@@ -252,8 +252,8 @@ Resources:
           Value:
             Fn::If:
               - CheckEnvironment
-              - !Sub ${EnvironmentName}-${PublicSubnet1Name}
-              - !Sub ${PublicSubnet1Name}
+              - !Sub ${EnvironmentName}-${VpcName}-${PublicSubnet1Name}
+              - !Sub ${VpcName}-${PublicSubnet1Name}
         - Key: Environment
           Value: !Ref EnvironmentName
   PublicSubnet2:
@@ -274,8 +274,8 @@ Resources:
           Value:
             Fn::If:
               - CheckEnvironment
-              - !Sub ${EnvironmentName}-${PublicSubnet2Name}
-              - !Sub ${PublicSubnet2Name}
+              - !Sub ${EnvironmentName}-${VpcName}-${PublicSubnet2Name}
+              - !Sub ${VpcName}-${PublicSubnet2Name}
         - Key: Environment
           Value: !Ref EnvironmentName
   PrivateSubnet1:
@@ -292,8 +292,8 @@ Resources:
           Value:
             Fn::If:
               - CheckEnvironment
-              - !Sub ${EnvironmentName}-${PrivateSubnet1Name}
-              - !Sub ${PrivateSubnet1Name}
+              - !Sub ${EnvironmentName}-${VpcName}-${PrivateSubnet1Name}
+              - !Sub ${VpcName}-${PrivateSubnet1Name}
         - Key: Environment
           Value: !Ref EnvironmentName
   PrivateSubnet2:
@@ -310,8 +310,8 @@ Resources:
           Value:
             Fn::If:
               - CheckEnvironment
-              - !Sub ${EnvironmentName}-${PrivateSubnet2Name}
-              - !Sub ${PrivateSubnet2Name}
+              - !Sub ${EnvironmentName}-${VpcName}-${PrivateSubnet2Name}
+              - !Sub ${VpcName}-${PrivateSubnet2Name}
         - Key: Environment
           Value: !Ref EnvironmentName
   #------------------ Nat GW
@@ -374,7 +374,11 @@ Resources:
       VpcId: !Ref Vpc
       Tags:
         - Key: Name
-          Value: !Sub ${VpcName}-PubSubRouteTable
+          Value:
+            Fn::If:
+              - CheckEnvironment
+              - !Sub ${EnvironmentName}-${VpcName}-PubSubRouteTable
+              - !Sub ${VpcName}-PubSubRouteTable
         - Key: Environment
           Value: !Ref EnvironmentName
   VpcInternetRote:
