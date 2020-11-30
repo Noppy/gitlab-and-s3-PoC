@@ -1,6 +1,15 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: Deploy Security Group
 #-------------------------------------------------------
+Parameters:
+  #------------------
+  AllowRpdCidr:
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    Default: 0.0.0.0/0
+    AllowedPattern: "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})"
+    ConstraintDescription: Must be like 10.1.0.0/16
 Resources:
   GitlabSG:
     Type: AWS::EC2::SecurityGroup
@@ -29,6 +38,25 @@ Resources:
       ToPort: 22
       CidrIp: 0.0.0.0/0
   #--
+  RdsSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: GitlabVPC-RdsSG
+      GroupDescription: SG for RDS
+      VpcId: 
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcId
+      Tags:
+        - Key: Name
+          Value: GitlabVPC-RdsSG
+  RdsSGReceivPstgreSQL:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref RdsSG
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      SourceSecurityGroupId: !Ref GitlabSG
+  #--
   ClientSG:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -47,6 +75,22 @@ Resources:
       FromPort: 22
       ToPort: 22
       CidrIp: 0.0.0.0/0
+  ClientSGReceivRdp1:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClientSG
+      IpProtocol: tcp
+      FromPort: 3389
+      ToPort: 3389
+      CidrIp: 10.0.0.0/8
+  ClientSGReceivRdp2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClientSG
+      IpProtocol: tcp
+      FromPort: 3389
+      ToPort: 3389
+      CidrIp: !Ref AllowRpdCidr
 Outputs:
   #------------------ VPC
   GitlabSGId:
@@ -54,6 +98,11 @@ Outputs:
     Value: !Ref GitlabSG
     Export:
       Name: !Sub "${AWS::StackName}-GitlabSGId"
+  RdsSGId:
+    Description:  RdsSG ID
+    Value: !Ref RdsSG
+    Export:
+      Name: !Sub "${AWS::StackName}-RdsSGId"
   ClientSGId:
     Description:  ClientSG ID
     Value: !Ref ClientSG

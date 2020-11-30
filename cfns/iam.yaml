@@ -1,0 +1,107 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy s3 and VPCEndpoint
+#----------------------------------------------
+Resources:
+  BastionRole:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+  BastionRolePlofile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref BastionRole
+  #-----
+  GitlabS3Role:
+    Type: "AWS::IAM::Role"
+    Properties: 
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        -
+          PolicyName: "OperationS3"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: Allow
+                Action: 
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:PutObjectAcl"
+                Resource:
+                  - Fn::Join:
+                    - ""
+                    - 
+                      - Fn::ImportValue: GitlabS3PoC-S3-S3BucketArn
+                      - "/*"
+              - 
+                Effect: Allow
+                Action: 
+                  - "s3:ListBucket"
+                  - "s3:AbortMultipartUpload"
+                  - "s3:ListMultipartUploadParts"
+                  - "s3:ListBucketMultipartUploads"
+                Resource:
+                  - Fn::ImportValue: GitlabS3PoC-S3-S3BucketArn
+  GitlabS3RolePlofile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles:
+        - !Ref GitlabS3Role
+Outputs:
+  #---------------- IAM Role
+  BastionRoleArn:
+    Description: Role Arn of BastionRole
+    Value: !GetAtt BastionRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionRoleArn
+  BastionRoleName:
+    Description: Role Name of BastionRole
+    Value: !Ref BastionRole
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionRoleName
+  BastionRolePlofile:
+    Description: Arn of BastionRolePlofile
+    Value: !Ref BastionRolePlofile
+    Export:
+      Name: !Sub ${AWS::StackName}-BastionRolePlofile
+  #---
+  GitlabS3RoleArn:
+    Description: Role Arn of GitlabS3Role
+    Value: !GetAtt GitlabS3Role.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}-GitlabS3RoleArn
+  GitlabS3RoleName:
+    Description: Role Name of GitlabS3Role
+    Value: !Ref GitlabS3Role
+    Export:
+      Name: !Sub ${AWS::StackName}-GitlabS3RoleName
+  GitlabS3RolePlofile:
+    Description: Arn of GitlabS3RolePlofile
+    Value: !Ref GitlabS3RolePlofile
+    Export:
+      Name: !Sub ${AWS::StackName}-GitlabS3RolePlofile

@@ -1,7 +1,7 @@
 # Glitlab + S3検証
 # 検証概要
 
-
+https://docs.gitlab.com/ee/install/aws/
 
 # 作成手順
 ## (1)事前設定
@@ -230,6 +230,15 @@ aws --profile ${PROFILE} cloudformation create-stack \
 ## (3) Security Group作成(CloudFormation利用)
 EC2インスタンスに適用するSecurityGroupを作成します。
 ```shell
+RDP_CIDR="27.0.0.0/8"
+
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AllowRpdCidr",
+    "ParameterValue": "'"${RDP_CIDR}"'"
+  }
+]'
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-SecurityGroups \
     --template-body "file://./cfns/sg.yaml" ;
@@ -240,7 +249,297 @@ Gitlab用のS3バケットとGitLabVPCにVPCEを作成します。
 Gitlab用のS3バケットは、GitLabVPCのVPCEからのアクセスのみ許可します。
 GitLabVPCにVPCEは、Gitlab用のS3バケットとAmazon Linux2のyumリポジトリアクセスのみ許可します。
 ```shell
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-S3 \
+    --template-body "file://./cfns/s3.yaml" ;
 ```
+## (5) IAMロール作成
+
+```shell
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-Iam \
+    --template-body "file://./cfns/iam.yaml" \
+    --capabilities CAPABILITY_IAM ;
+```
+## (5) Linuxクライアントインスタンスの作成
+### (5)-(a) 情報設定
+```shell
+KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
+AL2_AMIID=$(aws --profile ${PROFILE} --output text \
+    ec2 describe-images \
+        --owners amazon \
+        --filters 'Name=name,Values=amzn2-ami-hvm-2.0.????????.?-x86_64-gp2' \
+                  'Name=state,Values=available' \
+        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
+echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${AL2_AMIID}"
+```
+### (5)-(b) Bastionインスタンス作成
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${AL2_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create Bastion
+
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-Bastion  \
+    --template-body "file://./cfns/bastion.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (5)-(c) Clientインスタンス作成
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${AL2_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create Bastion
+
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-Client  \
+    --template-body "file://./cfns/client.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (5)-(d) ログイン確認とClientへのgitインストール
+別ターミナルを起動し下記を実行して作成したインスタンスにログイン可能かを確認します。
+```shell
+#別ターミナルを起動し下記を実行
+
+#初期化
+export PROFILE=default #aa#デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
+export REGION=$(aws --profile ${PROFILE} configure get region)
+echo "${PROFILE}  ${REGION}"
+
+#BastionのPublic IP取得
+BastionIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Bastion \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePublicIp`].[OutputValue]')
+echo "BastionIP = ${BastionIP}"
+
+#Bastionにログイン
+ssh-add
+ssh -A ec2-user@${BastionIP}
+```
+Bastionにログインしたら初期化処理を行います。
+```shell
+# AWS cli初期設定
+Region=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed -e 's/.$//')
+aws configure set region ${Region}
+aws configure set output json
+
+#動作確認
+aws sts get-caller-identity
+
+#利用するプロファイル設定
+export PROFILE=default
+```
+git Clientへのアクセス確認を行います。
+```shell
+#ClientのPublic IP取得
+ClientIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Client \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo "ClientIP = ${ClientIP}"
+
+#Clientにログイン
+ssh -A ec2-user@${ClientIP}
+```
+Clientにログインできたいら、gitをインストールする
+```shell
+#gitをインストール
+sudo yum -y install git
+```
+
+## (6) Windowsクライアントインスタンスの作成
+元のCloudFormationの作業を行っていたターミナルに戻り、Windowsの踏み台をClientを作成する
+### (6)-(a) 情報設定
+```shell
+KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
+WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
+    ec2 describe-images \
+        --owners amazon \
+        --filters 'Name=name,Values=Windows_Server-2019-Japanese-Full-Base-????.??.??' \
+                  'Name=state,Values=available' \
+        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
+echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${WIN2019_AMIID}"
+```
+### (6)-(b) Windows Bastion
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${WIN2019_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create Bastion
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-BastionWin  \
+    --template-body "file://./cfns/bastion.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (6)-(c) Windows Client
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${WIN2019_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create Bastion
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-ClientWin  \
+    --template-body "file://./cfns/client.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (6)-(d)セットアップ
+- BastionにRDPでログインする。
+- ClientにRDPログインする。
+- ClientにRDPをセットアップする
+  - Linux BastionでCrhomをダウンロードする
+  ```shell
+  curl -OL https://dl.google.com/tag/s/appguid%3D%7B8A69D345-D564-463C-AFF1-A69D9E530F96%7D%26iid%3D%7BF562C505-772C-7993-3E76-C49E22834DC7%7D%26lang%3Den%26browser%3D4%26usagestats%3D0%26appname%3DGoogle%2520Chrome%26needsadmin%3Dtrue%26ap%3Dx64-stable-statsdef_0%26brand%3DGCEB/dl/chrome/install/GoogleChromeEnterpriseBundle64.zip
+  ```
+  - Windows Clientに移動しsshログインをセットアップする
+  ```ps
+  mkdir .ssh
+  cd .ssh
+  notepad id_rsa
+  <メモ帳が開いたら秘密鍵を設定して保存する>
+
+  notepad config
+  <メモ帳が開いたら下記を設定する>
+  Host hoge
+    HostName <BastionLinuxのPrivateIP>
+    port 22
+    User ec2-user
+    Protocol 2
+    IdentityFile C:\Users\Administrator\.ssh\id_rsa
+  ```
+  - Basion LinuxからChromをscpで取得する
+  ```ps
+   scp ec2-user@10.1.30.232:/home/ec2-user/GoogleChromeEnterpriseBundle64.zip .
+  ```
+  - zipを解凍して、Installersの<code>GoogleChromeStandaloneEnterprise64</code>でchromをセットアップをする
+
+
+## (7) Gitlabセットアップ
+### (7)-(a) Gitlabインスタンスの作成
+元のCloudFormationの作業を行っていたターミナルに戻り、Gitlabのインスタンスを作成します。
+手順は、https://docs.gitlab.com/ee/install/aws/を参考にしています。
+### (6)-(b) RDSセットアップ
+gitlab用のRDS(PostgreSQL)をセットアップします。
+```shell
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-Rds  \
+    --template-body "file://./cfns/rds.yaml";
+```
+
+
+### (6)-(a) 情報設定
+```shell
+KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。  
+INSTANCE_TYPE="t2.micro"        #インスタンスタイプ設定
+
+#最新のAmazon Linux2のAMI IDを取得します。
+AL2_AMIID=$(aws --profile ${PROFILE} --output text \
+    ec2 describe-images \
+        --owners amazon \
+        --filters 'Name=name,Values=amzn2-ami-hvm-2.0.????????.?-x86_64-gp2' \
+                  'Name=state,Values=available' \
+        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
+echo -e "KEYNAME      = ${KEYNAME}\nINSTANCE_TYPE= ${INSTANCE_TYPE}\nAL2_AMIID    = ${AL2_AMIID}"
+
+# VPC,SG情報取得
+PubSub1Id=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-ClientVPC \
+        --query 'Stacks[].Outputs[?OutputKey==`PublicSubnet1Id`].[OutputValue]')
+PrivateSub1Id=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-ClientVPC \
+        --query 'Stacks[].Outputs[?OutputKey==`PrivateSubnet1Id`].[OutputValue]')
+SG_ID=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-SecurityGroups \
+        --query 'Stacks[].Outputs[?OutputKey==`ClientSGId`].[OutputValue]')
+
+echo -e "PubSub1Id    = $PubSub1Id\nPrivateSub1Id= $PrivateSub1Id\nSG_ID        = ${SG_ID}"
+```
+### (5)-(b) Bastionサーバ
+```shell
+#タグ設定
+TAGJSON='
+[
+    {
+        "ResourceType": "instance",
+        "Tags": [
+            {
+                "Key": "Name",
+                "Value": "GitlabPoC-Bastion"
+            }
+        ]
+    }
+]'
+
+#ユーザデータ設定
+USER_DATA='
+#!/bin/bash -xe
+                
+yum -y update
+hostnamectl set-hostname ECSWorker-Bastion
+'
+# サーバの起動
+aws --profile ${PROFILE} --no-cli-pager \
+    ec2 run-instances \
+        --image-id ${AL2_AMIID} \
+        --instance-type ${INSTANCE_TYPE} \
+        --key-name ${KEYNAME} \
+        --subnet-id ${PubSub1Id} \
+        --security-group-ids ${SG_ID} \
+        --associate-public-ip-address \
+        --tag-specifications "${TAGJSON}" \
+        --user-data "${USER_DATA}";
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 

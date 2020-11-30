@@ -64,7 +64,7 @@ Resources:
                   - !GetAtt S3Bucket.Arn
                   - "/*"
 Outputs:
-  #------------------ VPC
+  #------------------ S3
   S3BucketName:
     Description: S3Bucket Name
     Value: !Ref S3Bucket

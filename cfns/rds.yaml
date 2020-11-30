@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy RDS for gitlab
+#----------------------------------------------
+Parameters:
+  #------------------
+  RdsDbname:
+    Type: String
+    Default: gitlabpocgitlabdbms
+  RdsMasterUsername:
+    Type: String
+    Default: gitlab
+  RdsMasterUserPassword:
+    Type: String
+    Default: mypassword
+  RdsEngineEngine:
+    Type: String
+    Default: postgres
+  RdsEngineVersion:
+    Type: String
+    Default: 11.9
+  RdsDBInstanceClass:
+    Type: String
+    Default: db.m5.xlarge
+  RdsAllocatedStorage:
+    Description: Allocated Storage Size(GB)
+    Type: Number
+    Default: 100
+    MaxValue: 10000
+    MinValue: 100
+  #------------------
+Resources:
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: ${AWS::StackName}-RDS-PosgreSqlDbSubnet
+      SubnetIds:
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet1Id
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet2Id
+  DBInstance:
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Type: AWS::RDS::DBInstance
+    Properties:
+      #DB Basinc setting
+      DBName: !Ref RdsDbname
+      MasterUsername: !Ref RdsMasterUsername
+      MasterUserPassword: !Ref RdsMasterUserPassword
+      Engine: !Ref RdsEngineEngine
+      EngineVersion: !Ref RdsEngineVersion
+      #DB Instance setting
+      DBInstanceClass: !Ref RdsDBInstanceClass
+      #Multi-AZs and network setting
+      MultiAZ: true
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+      - Fn::ImportValue: GitlabS3PoC-SecurityGroups-RdsSGId
+      # Storage setting
+      AllocatedStorage: !Ref RdsAllocatedStorage
+      StorageType: gp2
+      StorageEncrypted: true
+      #Mantainances
+      AllowMajorVersionUpgrade: false
+      AutoMinorVersionUpgrade: true
+      BackupRetentionPeriod: 0
+      CopyTagsToSnapshot: true
+#----------------------------------------------
+Outputs:
+  RdsAddress:
+    Description: endpoint of rds
+    Value: !GetAtt DBInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsAddress
+  RdsPort:
+    Description: endpoint of rds
+    Value: !GetAtt DBInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsPort
+  RdsUsername:
+    Description: user name of RDS
+    Value: !Ref RdsMasterUsername
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsUsername
+  RdsMasterUserPassword:
+    Description: user name of RDS
+    Value: !Ref RdsMasterUserPassword
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsMasterUserPassword
+  RdsDBName:
+    Description: RdsDBName
+    Value: !Ref RdsDbname
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsDBName
+  RdsId:
+    Description: ID of RDS(Posgresql)
+    Value: !Ref DBInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-RdsId
