@@ -1,0 +1,70 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy transit gateway
+Resources:
+  #------------------ TGW
+  Tgw:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Description: "tgw for gitlab poc"
+      AutoAcceptSharedAttachments: enable
+      DefaultRouteTableAssociation: enable
+      DefaultRouteTablePropagation: enable
+      DnsSupport: enable
+      #MulticastSupport: disable
+      VpnEcmpSupport: enable
+  TgwAttachClientVpc:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties: 
+      TransitGatewayId: !Ref Tgw
+      VpcId:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcId
+      SubnetIds: 
+        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet1Id
+        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet2Id
+  TgwAttachGitlabVpc:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties: 
+      TransitGatewayId: !Ref Tgw
+      VpcId:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VPC-VpcId
+      SubnetIds: 
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-VPC-PublicSubnet1Id
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-VPC-PublicSubnet2Id
+  #------------------ Route for VPC
+  ClientVpcPrivateSubnet1:
+    Type: AWS::EC2::Route
+    DependsOn: TgwAttachClientVpc
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet1RouteTableId
+      DestinationCidrBlock:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
+      TransitGatewayId: !Ref Tgw
+  ClientVpcPrivateSubnet2:
+    Type: AWS::EC2::Route
+    DependsOn: TgwAttachClientVpc
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet2RouteTableId
+      DestinationCidrBlock:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
+      TransitGatewayId: !Ref Tgw
+  #--
+  GitlabVpCPrivateSubnet1:
+    Type: AWS::EC2::Route
+    DependsOn: TgwAttachGitlabVpc
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet1RouteTableId
+      DestinationCidrBlock:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcCidr
+      TransitGatewayId: !Ref Tgw
+  GitlabVpCPrivateSubnet2:
+    Type: AWS::EC2::Route
+    DependsOn: TgwAttachGitlabVpc
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet2RouteTableId
+      DestinationCidrBlock:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcCidr
+      TransitGatewayId: !Ref Tgw
