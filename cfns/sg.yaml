@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy Security Group
+#-------------------------------------------------------
+Resources:
+  GitlabSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: GitlabVPC-InstanceSG
+      GroupDescription: SG for Gitlab instances
+      VpcId: 
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcId
+      Tags:
+        - Key: Name
+          Value: GitlabVPC-InstanceSG
+  GitlabSGReceivHttps:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GitlabSG
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
+  GitlabSGReceivSsh:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GitlabSG
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0
+  #--
+  ClientSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ClientVPC-InstanceSG
+      GroupDescription: SG for Client and bashtion instances
+      VpcId: 
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcId
+      Tags:
+        - Key: Name
+          Value: ClientVPC-InstanceSG
+  ClientSGReceivSsh:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ClientSG
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0
+Outputs:
+  #------------------ VPC
+  GitlabSGId:
+    Description:  GitlabSG ID
+    Value: !Ref GitlabSG
+    Export:
+      Name: !Sub "${AWS::StackName}-GitlabSGId"
+  ClientSGId:
+    Description:  ClientSG ID
+    Value: !Ref ClientSG
+    Export:
+      Name: !Sub "${AWS::StackName}-ClientSGId"

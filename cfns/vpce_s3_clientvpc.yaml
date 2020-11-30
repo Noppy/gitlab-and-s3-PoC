@@ -1,0 +1,23 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy VPCE(S3)
+Resources:
+  #------------------VPC Endpoint
+  S3VpcEndpointClientVPC:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      VpcId:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet1RouteTableId
+        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet2RouteTableId
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:*"
+            Resource:
+              # Allow connections to the Amazon Linux2 yum repositories
+              - "arn:aws:s3:::amazonlinux.*.amazonaws.com/*"

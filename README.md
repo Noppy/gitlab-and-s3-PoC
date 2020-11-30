@@ -56,7 +56,7 @@ cd gitlab-and-s3-PoC/
 ### (1)-(c) CLI実行用の事前準備
 これ以降のAWS-CLIで共通で利用するパラメータを環境変数で設定しておきます。
 ```shell
-export PROFILE=default  #デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
+export PROFILE=default #aa#デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
 export REGION=$(aws --profile ${PROFILE} configure get region)
 echo "${PROFILE}  ${REGION}"
 ```
@@ -218,78 +218,34 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-TGW \
     --template-body "file://./cfns/tgw.yaml" ;
 ```
-### (2)-(d) VPCE作成
-```shell
-## (4)VPCE作成(CloudFormation利用)
-![VPCE](./Documents/14_VPCE.png)
-### (4)-(a) VPCE(PrivateLink)
+### (2)-(d) ClientVPC VPCE作成
+ClientVPCにて、Private Subnet上からAmazon Linux2のyumアップデートが可能となるよう、Amazon Linux2のyumリポジトリ用バケットへのアクセスのみ許可したS3のVPECエンドポイントを作成します。
 ```shell
 # Internal-VPCへのVPCE作成
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "VpcStackName",
-    "ParameterValue": "MailPoC-InternalVPC"
-  },
-  {
-    "ParameterKey": "VpcName",
-    "ParameterValue": "InternalVPC"
-  }
-]'
 aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-Internal-VPC-VPCE \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --template-body "file://./cfn/vpce.yaml" ;
-
-
-
-# DMZ-Inbound-VPCへのVPCE作成
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "VpcStackName",
-    "ParameterValue": "MailPoC-DMZ-Inbound-VPC"
-  },
-  {
-    "ParameterKey": "VpcName",
-    "ParameterValue": "DMZInboundVPC"
-  }
-]'
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-DMZ-Inbound-VPC-VPCE \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --template-body "file://./cfn/vpce.yaml" ;
-
-# DMZ-Outbound-VPCへのVPCE作成
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "VpcStackName",
-    "ParameterValue": "MailPoC-DMZ-Outbound-VPC"
-  },
-  {
-    "ParameterKey": "VpcName",
-    "ParameterValue": "DMZOutboundVPC"
-  }
-]'
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-DMZ-Outbound-VPC-VPCE \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --template-body "file://./cfn/vpce.yaml" ;
+    --stack-name GitlabS3PoC-ClientVPC-VPCE \
+    --template-body "file://./cfns/vpce_s3_clientvpc.yaml" ;
 ```
-### (4)-(b) VPCE(S3)
-```shell
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-VPCES3 \
-    --template-body "file://./cfn/vpce_s3.yaml" ;
-```
-## (5)SecurityGroup作成(CloudFormation利用)
+
+## (3) Security Group作成(CloudFormation利用)
 EC2インスタンスに適用するSecurityGroupを作成します。
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-SecurityGroups \
-    --template-body "file://./cfn/sg.yaml" ;
+    --stack-name GitlabS3PoC-SecurityGroups \
+    --template-body "file://./cfns/sg.yaml" ;
 ```
+
+## (4) Gitlab用S3バケットとVPCE作成(CloudFormation利用)
+Gitlab用のS3バケットとGitLabVPCにVPCEを作成します。
+Gitlab用のS3バケットは、GitLabVPCのVPCEからのアクセスのみ許可します。
+GitLabVPCにVPCEは、Gitlab用のS3バケットとAmazon Linux2のyumリポジトリアクセスのみ許可します。
+```shell
+```
+
+
+
+
+
 ## (6) バッチ・リレーメールインスタンスの準備
 バッチ用インスタンス、およびリレーメール用インスタンスの共通設定を行います。
 ### (6)-(a) インスタンスロール作成 (CloudFormation利用)
