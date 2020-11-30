@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy s3 and VPCEndpoint
+#----------------------------------------------
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: True
+        BlockPublicPolicy: True
+        IgnorePublicAcls: True
+        RestrictPublicBuckets: True
+  S3BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: !Ref S3Bucket
+      PolicyDocument: 
+        Version: "2012-10-17"
+        Statement: 
+          - 
+            Effect: "Deny"
+            Principal: "*"
+            Action: 
+              - "s3:*Object"
+              - "s3:*ObjectVersion"
+              - "s3:List*"
+            Resource:
+              - !GetAtt S3Bucket.Arn
+              - Fn::Join:
+                - ""
+                - 
+                  - !GetAtt S3Bucket.Arn
+                  - "/*"
+            Condition:
+              StringNotEquals:
+                aws:sourceVpce:
+                  - !Ref S3VpcEndpointClientVPC
+  #------------------VPC Endpoint
+  S3VpcEndpointClientVPC:
+    Type: 'AWS::EC2::VPCEndpoint'
+    Properties:
+      VpcId:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcId
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.s3
+      RouteTableIds:
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet1RouteTableId
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet2RouteTableId
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal: "*"
+            Action:
+              - "s3:*"
+            Resource:
+              # Allow connections to the Amazon Linux2 yum repositories
+              - "arn:aws:s3:::amazonlinux.*.amazonaws.com/*"
+              # Allow connections to the created bucket by this Cfn
+              - !GetAtt S3Bucket.Arn
+              - Fn::Join:
+                - ""
+                - 
+                  - !GetAtt S3Bucket.Arn
+                  - "/*"
+Outputs:
+  #------------------ VPC
+  S3BucketName:
+    Description: S3Bucket Name
+    Value: !Ref S3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-S3BucketName"
+  S3BucketArn:
+    Description: S3Bucket Name
+    Value: !GetAtt S3Bucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-S3BucketArn"
