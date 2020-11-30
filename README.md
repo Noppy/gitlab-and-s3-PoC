@@ -451,50 +451,47 @@ aws --profile ${PROFILE} cloudformation create-stack \
   - zipを解凍して、Installersの<code>GoogleChromeStandaloneEnterprise64</code>でchromをセットアップをする
 
 
-## (7) Gitlabセットアップ
+## (7) Gitlabセットアップ-1 インスタンスのセットアップ
 ### (7)-(a) Gitlabインスタンスの作成
 元のCloudFormationの作業を行っていたターミナルに戻り、Gitlabのインスタンスを作成します。
 手順は、https://docs.gitlab.com/ee/install/aws/を参考にしています。
-### (6)-(b) RDSセットアップ
+### (7)-(b) RDSセットアップ
 gitlab用のRDS(PostgreSQL)をセットアップします。
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-Rds  \
     --template-body "file://./cfns/rds.yaml";
 ```
-
-
-### (6)-(a) 情報設定
+### (7)-(c) gitlabインスタンス設定情報の入力
 ```shell
 KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。  
-INSTANCE_TYPE="t2.micro"        #インスタンスタイプ設定
+INSTANCE_TYPE="c5.xlarge"        #インスタンスタイプ設定
 
-#最新のAmazon Linux2のAMI IDを取得します。
-AL2_AMIID=$(aws --profile ${PROFILE} --output text \
+#最新のGitlab CEのAMI IDを取得します。
+GITLAB_AMIID=$(aws --profile ${PROFILE} --output text \
     ec2 describe-images \
-        --owners amazon \
-        --filters 'Name=name,Values=amzn2-ami-hvm-2.0.????????.?-x86_64-gp2' \
+        --owners 782774275127 \
+        --filters 'Name=name,Values=GitLab EE*' \
                   'Name=state,Values=available' \
-        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
-echo -e "KEYNAME      = ${KEYNAME}\nINSTANCE_TYPE= ${INSTANCE_TYPE}\nAL2_AMIID    = ${AL2_AMIID}"
+    --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
+echo -e "KEYNAME      = ${KEYNAME}\nINSTANCE_TYPE= ${INSTANCE_TYPE}\nGITLAB_AMIID = ${GITLAB_AMIID}"
 
 # VPC,SG情報取得
-PubSub1Id=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-ClientVPC \
-        --query 'Stacks[].Outputs[?OutputKey==`PublicSubnet1Id`].[OutputValue]')
 PrivateSub1Id=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-ClientVPC \
+        --stack-name GitlabS3PoC-GitlabVPC \
         --query 'Stacks[].Outputs[?OutputKey==`PrivateSubnet1Id`].[OutputValue]')
 SG_ID=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-SecurityGroups \
-        --query 'Stacks[].Outputs[?OutputKey==`ClientSGId`].[OutputValue]')
-
-echo -e "PubSub1Id    = $PubSub1Id\nPrivateSub1Id= $PrivateSub1Id\nSG_ID        = ${SG_ID}"
+        --query 'Stacks[].Outputs[?OutputKey==`GitlabSGId`].[OutputValue]')
+GitLabRole=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Iam \
+        --query 'Stacks[].Outputs[?OutputKey==`GitlabS3RolePlofile`].[OutputValue]' )
+echo -e "PrivateSub1Id= $PrivateSub1Id\nSG_ID        = ${SG_ID}\nGitLabRole   = ${GitLabRole}"
 ```
-### (5)-(b) Bastionサーバ
+### (7)-(d) Gitlabサーバ
 ```shell
 #タグ設定
 TAGJSON='
@@ -504,217 +501,123 @@ TAGJSON='
         "Tags": [
             {
                 "Key": "Name",
-                "Value": "GitlabPoC-Bastion"
+                "Value": "GitlabPoC-Gitlab"
             }
         ]
     }
 ]'
 
-#ユーザデータ設定
-USER_DATA='
-#!/bin/bash -xe
-                
-yum -y update
-hostnamectl set-hostname ECSWorker-Bastion
-'
 # サーバの起動
 aws --profile ${PROFILE} --no-cli-pager \
     ec2 run-instances \
-        --image-id ${AL2_AMIID} \
+        --image-id ${GITLAB_AMIID} \
         --instance-type ${INSTANCE_TYPE} \
         --key-name ${KEYNAME} \
-        --subnet-id ${PubSub1Id} \
+        --iam-instance-profile "Name=${GitLabRole}" \
+        --subnet-id ${PrivateSub1Id} \
         --security-group-ids ${SG_ID} \
-        --associate-public-ip-address \
-        --tag-specifications "${TAGJSON}" \
-        --user-data "${USER_DATA}";
+        --tag-specifications "${TAGJSON}";
+
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+	  ec2 describe-instances \
+	    --filters \
+	      "Name=instance-state-name,Values=running" \
+	      "Name=tag:Name,Values=GitlabPoC-Gitlab" \
+	  --query 'Reservations[].Instances[].PrivateIpAddress')
+echo "GitlabIP = ${GitlabIP}"
 ```
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-## (6) バッチ・リレーメールインスタンスの準備
-バッチ用インスタンス、およびリレーメール用インスタンスの共通設定を行います。
-### (6)-(a) インスタンスロール作成 (CloudFormation利用)
+## (8) Gitlabセットアップ-2 gitlabカスタム設定
+### (8)-(a) GitlabへのSSH接続
+- LinuxのBastionから、LinuxのClientにsshログインする
+- そこからGitlabにsshでログイン。ログインユーザは<code>ubuntu</code>。
 ```shell
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-IAM-For-Instance \
-    --template-body "file://./cfn/iam-relaymail.yaml" \
-    --capabilities CAPABILITY_NAMED_IAM ;
+# LinuxのClient
+ssh ubuntu@<GitlabのPrivateIP>
+
+Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-1117-aws x86_64)
+
+* Documentation:  https://help.ubuntu.com
+* Management:     https://landscape.canonical.com
+* Support:        https://ubuntu.com/advantage
 ```
-### (6)-(b)共通のパラメータ設定 
-ここで必ず、検証で外部からSubmissionPortにメール送信する時に利用する環境のパブリックIPを<code>NETWORK_FOR_SEMD_MAIL</code>に指定してください。また、利用するキーペアを<code>KEYNAME</code>に設定して下さい。
+
+### (8)-(b) gitlab.rbの設定変更
+<code>/etc/gitlab/gitlab.rb</code>を特権ユーザで編集し、Let's Encryptを無効化します。
 ```shell
-NETWORK_FOR_SEMD_MAIL="<<検証時の外部クライアントのIPをCIDRで記載>>"
-POSTFIX_MYNETWORK="127.0.0.1, 10.0.0.0/8"
-POSTFIX_MYNETWORK_INBOUND="${POSTFIX_MYNETWORK},${NETWORK_FOR_SEMD_MAIL}"
-
-KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。  
-
-#最新のAmazon Linux2のAMI IDを取得します。
-AL2_AMIID=$(aws --profile ${PROFILE} --output text \
-    ec2 describe-images \
-        --owners amazon \
-        --filters 'Name=name,Values=amzn2-ami-hvm-2.0.????????.?-x86_64-gp2' \
-                  'Name=state,Values=available' \
-        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
-echo -e "POSTFIX_MYNETWORK_INBOUND=${POSTFIX_MYNETWORK_INBOUND}\nKEYNAME=${KEYNAME}\nAL2_AMIID=${AL2_AMIID}"
+sudo vi /etc/gitlab/gitlab.rb
 ```
-## (7)リレーメールインスタンス
-### (6)-(a) (Option)Gmail接続用のパスワードのStore
-検証でGmailに接続するためのユーザIDとパスワードを安全に管理するため、System ManagerのParameter storeに格納します。<code>GMAIL_SASL_INFO</code>にPostfixで定義する形式でGmailの認証情報を設定します。Gmailの認証はユーザとパスワードですが、パスワードはアプリケーション用のパスワードをgoogleで払い出して設定するようにします。
-![SSM Parameter Store](./Documents/16_SSM_ParameterStore.png)
+- Let's Encryptの無効化(公式マニュアルにしたがって設定)
+```rb
+letsencrypt['enable'] = false
+```
+- external url変更(これを変更しないと起動しなかったため)
+```rb
+#元は external_url '' とあり=がないので追加する。
+external_url = ''
+```
+- 設定ファイルの編集が完了し書き込み終了たらreconfigurateする。
 ```shell
-# GMAILの接続用の認証情報の設定
-# username@gmail:passwordに、アカウント名とgoogleで払い出したアプリパスワードを設定します。
-GMAIL_SASL_INFO="[smtp.gmail.com]:587 username@gmail:password"
-
-# Parameter storeのPut
-aws --profile ${PROFILE} \
-  ssm put-parameter \
-    --name "mail-poc-gmail-sals-info" \
-    --value "${GMAIL_SASL_INFO}" \
-    --type SecureString \
-    --tags "Key=Name,Value=mail-poc-gmail-sals-info"
+sudo gitlab-ctl reconfigure
+sudo gitlab-ctl status
 ```
+- reconfigurationが成功すると、gitlabサービスが起動する。
+- 80ポートでアクセス可能なため、WindowsのClientから<code>http://<gitlabのPrivate IP></code>で接続確認する。
 
-### (7)-(b) OutboundのRelayMailインスタンス作成 (CloudFormation利用)
-![SSM Parameter Store](./Documents/17_OutboundInstance.png)
+### (8)-(c) PostgreSQLの設定
+Gitlab組み込みのPostgreSQLではなく、別途用意したrdsのPostgreSQLを利用する。
+- PostgreSQLの接続確認をする
 ```shell
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "KeyName",
-    "ParameterValue": "'"${KEYNAME}"'"
-  },
-  {
-    "ParameterKey": "AmiId",
-    "ParameterValue": "'"${AL2_AMIID}"'"
-  },
-  {
-    "ParameterKey": "PostfixMynetwork",
-    "ParameterValue": "'"${POSTFIX_MYNETWORK}"'"
-  }
-]'
+RDSEndpoint="<RDSのエンドポイントを設定>"
+sudo /opt/gitlab/embedded/bin/psql -U gitlab -h <rds-endpoint> -d gitlabhq_production
 
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-Outbound-RelayMail-Instance \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --template-body "file://./cfn/relaymail-outbound.yaml" \
-    --capabilities CAPABILITY_NAMED_IAM ;
+#接続すると以下のような表示さがれる
+SSL connection (protocol: TLSv1.2, cipher: ECDHE-RSA-AES256-GCM-SHA384, bits: 256, compression: off)
+Type "help" for help.
+
+gitlabhq=> 
 ```
+- extensionの作成
+```sql
+psql (10.9)
+Type "help" for help.
 
-## (8) バッチインスタンス作成(CloudFormation利用)
-![SSM Parameter Store](./Documents/18_BatchInstance.png)
+gitlab=# CREATE EXTENSION pg_trgm;
+gitlab=# CREATE EXTENSION btree_gist;
+gitlab=# \q
+```
+- <code>/etc/gitlab/gitlab.rb</code>の設定変更
 ```shell
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "KeyName",
-    "ParameterValue": "'"${KEYNAME}"'"
-  },
-  {
-    "ParameterKey": "AmiId",
-    "ParameterValue": "'"${AL2_AMIID}"'"
-  },
-  {
-    "ParameterKey": "PostfixMynetwork",
-    "ParameterValue": "'"${POSTFIX_MYNETWORK}"'"
-  }
-]'
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-Batch-Instance \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --template-body "file://./cfn/batch.yaml" \
-    --capabilities CAPABILITY_NAMED_IAM ;
+sudo vi /etc/gitlab/gitlab.rb
 ```
-## (9) InboundのRelayMailインスタンス作成 (CloudFormation利用)
-![SSM Parameter Store](./Documents/19_InboundInstance.png)
+```rb
+# Disable the built-in Postgres
+ postgresql['enable'] = false
+
+# Fill in the connection details
+gitlab_rails['db_adapter'] = "postgresql"
+gitlab_rails['db_encoding'] = "unicode"
+gitlab_rails['db_database'] = "gitlabhq_production"
+gitlab_rails['db_username'] = "gitlab"
+gitlab_rails['db_password'] = "mypassword"
+gitlab_rails['db_host'] = "<rds-endpoint>"
+```
+- 設定ファイルの編集が完了し書き込み終了たらreconfigurateする。
 ```shell
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "KeyName",
-    "ParameterValue": "'"${KEYNAME}"'"
-  },
-  {
-    "ParameterKey": "AmiId",
-    "ParameterValue": "'"${AL2_AMIID}"'"
-  },
-  {
-    "ParameterKey": "PostfixMynetwork",
-    "ParameterValue": "'"${POSTFIX_MYNETWORK_INBOUND}"'"
-  }
-]'
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-Inbound-RelayMail-Instance \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --template-body "file://./cfn/relaymail-inbound.yaml" \
-    --capabilities CAPABILITY_NAMED_IAM ;
+sudo gitlab-ctl reconfigure
+sudo gitlab-ctl status
 ```
-
-
-## (10) テスト
-### (10)-(a)メール送信テスト
-バッチインスタンスにSystems Manager Session Managerでアクセスし、メール送信のテストをします。
-#### (i)Systems Manager Session Managerによるバッチインスタンスアクセス
-+ マネージメントコンソールで、Systems Managerのサービスを開く
-+ 左側のナビゲーションペインから<code>セッションマネージャー</code>を開く
-+ <code>セッションを開始する</code>をクリックし、次の画面でリストから<code>MailPoC-InternalVPC-Batch</code>を選び、右上の<code>セッションを開始する</code>
-#### (ii)コマンドによるメール送信
+### (8)-(d) S3ストレージ利用
 ```shell
-sudo -i -u ec2-user
-To_Address="xxxxxx@xxxxxxx.com" #Gmailからのメール受信が可能なアドレスに変更する
-
-Subject="TestMail-$(date '+%Y%m%d%H%M%S')"
-SMTP="smtp=smtp://outbound-relaymail.mailpoc.local:587"
-From_Address="xxx"
-
-
-echo "テストメール$(date '+%Y%m%d%H%M%S')" | mail -s $Subject -S $SMTP -r $From_Address $To_Address
+sudo vi /etc/gitlab/gitlab.rb
 ```
-
-### (10)-(b)メール受信テスト
-#### (i) Cloud9(構築実行環境)からのメール送信
-```shell
-#ローカールでのmail送信テスト用にmailコマンドをインストール
-sudo yum -y install mailx
-
-#InboundのNLBのURLを取得
-NLB_DNS=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name MailPoC-Inbound-RelayMail-Instance \
-        --query 'Stacks[].Outputs[?OutputKey==`InboundRelaymailNlbDns`].[OutputValue]')
-
-echo -e "NLB_DNS= $NLB_DNS"
+```rb
 
 
-#メール送信
-Subject="TestMail-$(date '+%Y%m%d%H%M%S')"
-SMTP="smtp=smtp://${NLB_DNS}:587"
-From_Address="xxx"
-To_Address="ec2-user@mailpoc.pub"
 
-echo "テストメール$(date '+%Y%m%d%H%M%S')" | mail -s $Subject -S $SMTP -r $From_Address $To_Address
-```
-#### (ii)バッチインスタンスでのメール受信確認
-ec2-userにて、mailコマンドを実行しメールが受信されていることを確認します。
-```shell
-mail
-Heirloom Mail version 12.5 7/5/10.  Type ? for help.
-"/var/spool/mail/ec2-user": 1 message 1 new
->N  1 xxx                   Mon Sep 14 11:24  21/968   "TestMail-20200914112456"
-&
-```
+
+
+gitlabpocgitlabdbms
+
+
+https://qiita.com/supertaihei02/items/8c7b12b406cb6a1517a2

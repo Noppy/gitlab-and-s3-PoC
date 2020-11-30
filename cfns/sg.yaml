@@ -29,6 +29,22 @@ Resources:
       FromPort: 443
       ToPort: 443
       CidrIp: 0.0.0.0/0
+  GitlabSGReceivHttp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GitlabSG
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+      CidrIp: 0.0.0.0/0
+  GitlabSGReceivLB:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref GitlabSG
+      IpProtocol: tcp
+      FromPort: 8075
+      ToPort: 8075
+      CidrIp: 0.0.0.0/0
   GitlabSGReceivSsh:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -53,8 +69,8 @@ Resources:
     Properties:
       GroupId: !Ref RdsSG
       IpProtocol: tcp
-      FromPort: 22
-      ToPort: 22
+      FromPort: 5432
+      ToPort: 5432
       SourceSecurityGroupId: !Ref GitlabSG
   #--
   ClientSG:
