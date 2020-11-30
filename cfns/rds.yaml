@@ -5,7 +5,7 @@ Parameters:
   #------------------
   RdsDbname:
     Type: String
-    Default: gitlabpocgitlabdbms
+    Default: gitlabhq_production
   RdsMasterUsername:
     Type: String
     Default: gitlab
