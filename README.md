@@ -51,6 +51,7 @@ aws sts get-caller-identity
 下記コマンドで検証用資材をgit cloneします。
 ```shell
 git clone https://github.com/Noppy/gitlab-and-s3-PoC.git
+cd gitlab-and-s3-PoC/
 ```
 ### (1)-(c) CLI実行用の事前準備
 これ以降のAWS-CLIで共通で利用するパラメータを環境変数で設定しておきます。
@@ -65,7 +66,7 @@ gitコマンド用のクライアントVPC(ClientVPC)、gitlab用VPC(GitlabVPC)�
 なお、CloudFormationの進捗状況は、別途マネージメントコンソールの画面をだしCloudFormationのスタックを表示するとわかりやすいです。
 <img src="./Documents/" whdth=500>
 
-### (2)-(a) ClientVPC/GitlabVPC作成
+### (2)-(a) ClientVPC作成
 ```shell
 #ClientVPC
 CFN_STACK_PARAMETERS='
@@ -136,7 +137,9 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/vpc-4subnets.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}" \
     --capabilities CAPABILITY_IAM ;
-
+```
+### (2)-(b) GitlabVPC作成
+```shell
 # GitlabVPC
 CFN_STACK_PARAMETERS='
 [
@@ -208,19 +211,17 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --parameters "${CFN_STACK_PARAMETERS}" \
     --capabilities CAPABILITY_IAM ;
 ```
-### (2)-(b) TransitGateway接続(CloudFormation利用)
+### (2)-(c) TransitGateway接続(CloudFormation利用)
 ![TransitGateway](./Documents/)
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name MailPoC-DMZ-TGW \
+    --stack-name GitlabS3PoC-TGW \
     --template-body "file://./cfns/tgw.yaml" ;
 ```
-
-
-
-```
+### (2)-(d) VPCE作成
+```shell
 ## (4)VPCE作成(CloudFormation利用)
-![TransitGateway](./Documents/14_VPCE.png)
+![VPCE](./Documents/14_VPCE.png)
 ### (4)-(a) VPCE(PrivateLink)
 ```shell
 # Internal-VPCへのVPCE作成
@@ -239,6 +240,8 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name MailPoC-Internal-VPC-VPCE \
     --parameters "${CFN_STACK_PARAMETERS}" \
     --template-body "file://./cfn/vpce.yaml" ;
+
+
 
 # DMZ-Inbound-VPCへのVPCE作成
 CFN_STACK_PARAMETERS='

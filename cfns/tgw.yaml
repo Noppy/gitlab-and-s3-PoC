@@ -26,10 +26,10 @@ Resources:
     Properties: 
       TransitGatewayId: !Ref Tgw
       VpcId:
-        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VPC-VpcId
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcId
       SubnetIds: 
-        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-VPC-PublicSubnet1Id
-        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-VPC-PublicSubnet2Id
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PublicSubnet1Id
+        - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PublicSubnet2Id
   #------------------ Route for VPC
   ClientVpcPrivateSubnet1:
     Type: AWS::EC2::Route
