@@ -12,6 +12,9 @@ Resources:
       DnsSupport: enable
       #MulticastSupport: disable
       VpnEcmpSupport: enable
+      Tags:
+        - Key: Name
+          Value: GitlabS3PoC-Tgw
   TgwAttachClientVpc:
     Type: AWS::EC2::TransitGatewayAttachment
     Properties: 
@@ -21,6 +24,9 @@ Resources:
       SubnetIds: 
         - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet1Id
         - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: GitlabS3PoC-Tgw-ClientVPC
   TgwAttachGitlabVpc:
     Type: AWS::EC2::TransitGatewayAttachment
     Properties: 
@@ -30,6 +36,9 @@ Resources:
       SubnetIds: 
         - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PublicSubnet1Id
         - Fn::ImportValue: GitlabS3PoC-GitlabVPC-PublicSubnet2Id
+      Tags:
+        - Key: Name
+          Value: GitlabS3PoC-Tgw-GitlabVPC
   #------------------ Route for VPC
   ClientVpcPrivateSubnet1:
     Type: AWS::EC2::Route
