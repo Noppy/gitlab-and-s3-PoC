@@ -3,6 +3,10 @@
 
 https://docs.gitlab.com/ee/install/aws/
 
+## 注意事項
+- 事前にGitlab EEのFree Trialのコードを事前に取得する必要があります。取得は https://about.gitlab.com/free-trial/ にアクセスし、<b>GitLab Self-Managed</b>の<b>Start free trial</b>で情報を登録して取得します。取得したコードは、gitlabのセットアップで利用します。
+
+
 # 作成手順
 ## (1)事前設定
 ### (1)-(a) 作業環境の準備
@@ -12,7 +16,7 @@ https://docs.gitlab.com/ee/install/aws/
 * AdministratorAccessポリシーが付与され実行可能な、aws-cliのProfileの設定
 
 ### (1)-(b) (Option) Cloud9環境準備
-Cloud9利用のためには、インターネット経由でCloud9用の絵c2インスタンスにhttpsでアクセス可能である必要があります。
+Cloud9利用のためには、インターネット経由でCloud9用のEC2インスタンスにhttpsでアクセス可能である必要があります。
 #### (i) Cloud9インスタンスの作成
 + マネージメントコンソールに、AdministratorAccess権限のあるユーザでログインします。
 + サービスから<code>AWS Cloud9</code>に移動します。
@@ -321,7 +325,7 @@ aws --profile ${PROFILE} cloudformation create-stack \
 #別ターミナルを起動し下記を実行
 
 #初期化
-export PROFILE=default #aa#デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
+export PROFILE=default #デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
 export REGION=$(aws --profile ${PROFILE} configure get region)
 echo "${PROFILE}  ${REGION}"
 
@@ -345,13 +349,13 @@ aws configure set output json
 
 #動作確認
 aws sts get-caller-identity
-
-#利用するプロファイル設定
-export PROFILE=default
 ```
 git Clientへのアクセス確認を行います。
 ```shell
-#ClientのPublic IP取得
+#利用するプロファイル設定
+export PROFILE=default
+
+#ClientのPrivate IP取得
 ClientIP=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-Client \
@@ -562,14 +566,15 @@ sudo gitlab-ctl reconfigure
 sudo gitlab-ctl status
 ```
 - reconfigurationが成功すると、gitlabサービスが起動する。
-- 80ポートでアクセス可能なため、WindowsのClientから<code>http://<gitlabのPrivate IP></code>で接続確認する。
+- 80ポートでアクセス可能なため、WindowsのClientから<code>http://<gitlabのPrivate IP></code>で接続確認する。下記の画面が表示されればここまでの手順は問題ない。
+![Gitlab初期画面](./Documents/08-b_gitlab-inital.png)
 
 ### (8)-(c) PostgreSQLの設定
-Gitlab組み込みのPostgreSQLではなく、別途用意したrdsのPostgreSQLを利用する。
+デフォルトではGitlab組み込みのPostgreSQLを利用しています。ここでは組み込みDBではなく、別途用意したrdsのPostgreSQLを利用するよう設定変更します。
 - PostgreSQLの接続確認をする
 ```shell
 RDSEndpoint="<RDSのエンドポイントを設定>"
-sudo /opt/gitlab/embedded/bin/psql -U gitlab -h <rds-endpoint> -d gitlabhq_production
+sudo /opt/gitlab/embedded/bin/psql -U gitlab -h ${RDSEndpoint} -d gitlabhq_production
 
 #接続すると以下のような表示さがれる
 SSL connection (protocol: TLSv1.2, cipher: ECDHE-RSA-AES256-GCM-SHA384, bits: 256, compression: off)
@@ -592,7 +597,7 @@ sudo vi /etc/gitlab/gitlab.rb
 ```
 ```rb
 # Disable the built-in Postgres
- postgresql['enable'] = false
+postgresql['enable'] = false
 
 # Fill in the connection details
 gitlab_rails['db_adapter'] = "postgresql"
@@ -607,14 +612,70 @@ gitlab_rails['db_host'] = "<rds-endpoint>"
 sudo gitlab-ctl reconfigure
 sudo gitlab-ctl status
 ```
-### (8)-(d) S3ストレージ利用
+### (8)-(d) Gitlab EEのTrial License Key設定
+S3アクセスを利用するためには、Gitlab EEライセンスが必要になります。ここでは、予め取得しておいたGitlab EEのTrial License Keyを入力してEE限定機能を解除します。(Trialは30日間になります)
+- Gitlab画面にアクセスし、rootユーザのパスワードを設定
+![Gitlab初期画面](./Documents/08-b_gitlab-inital.png)
+- ユーザ名<code>root</code>、先に設定したパスワードでGitlabにログインする
+- <b>Admin Area</b>から<b>License</b>を選び、予め取得したライセンスコードを登録する。詳しくは、[GitlabドキュメントのUploading your license](https://docs.gitlab.com/ee/user/admin_area/license.html)を参照。
+
+### (8)-(e) S3ストレージ利用
+GitlabでS3を利用するようにします。S3アクセス時の認証情報は、インスタンンスに付与したインスタンスロールを利用するようにします。
+- 設定ファイルをviで開く
 ```shell
 sudo vi /etc/gitlab/gitlab.rb
 ```
+- 下記設定を追加する
 ```rb
+# Consolidated object storage configuration
+letsencrypt['enable'] = false
+external_url = ''
 
+# Disable the built-in Postgres
+postgresql['enable'] = false
 
+# Fill in the connection details
+gitlab_rails['db_adapter'] = "postgresql"
+gitlab_rails['db_encoding'] = "unicode"
+gitlab_rails['db_database'] = "gitlabhq_production"
+gitlab_rails['db_username'] = "gitlab"
+gitlab_rails['db_password'] = "mypassword"
+gitlab_rails['db_host'] = "gd1rqg75gzlcgjl.c15bz8qunqqh.ap-northeast-1.rds.amazonaws.com"
 
+# Consolidated object storage configuration
+gitlab_rails['object_store']['enabled'] = true
+gitlab_rails['object_store']['proxy_download'] = true
+gitlab_rails['object_store']['connection'] = {
+  'provider' => 'AWS',
+  'region' => 'ap-northeast-1',
+  'use_iam_profile' => true
+}
+
+gitlab_rails['object_store']['storage_options'] = {
+   'server_side_encryption' => 'AES256',
+}
+
+gitlab_rails['object_store']['objects']['artifacts']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+gitlab_rails['object_store']['objects']['external_diffs']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+gitlab_rails['object_store']['objects']['lfs']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+gitlab_rails['object_store']['objects']['uploads']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+gitlab_rails['object_store']['objects']['packages']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+gitlab_rails['object_store']['objects']['dependency_proxy']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+gitlab_rails['object_store']['objects']['terraform_state']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
+
+gitlab_rails['artifacts_object_store_enabled'] = true
+gitlab_rails['external_diffs_object_store_enabled'] = true
+gitlab_rails['lfs_object_store_enabled'] = true
+gitlab_rails['uploads_object_store_enabled'] = true
+gitlab_rails['packages_object_store_enabled'] = true
+
+gitlab_rails['backup_upload_connection'] = {
+  'provider' => 'AWS',
+  'region' => 'ap-northeast-1',
+  'use_iam_profile' => true
+}
+gitlab_rails['backup_upload_remote_directory'] = 'gitlabs3poc-s3-s3bucket-13yuuqyukzw3d'
+```
 
 
 gitlabpocgitlabdbms
