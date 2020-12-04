@@ -66,6 +66,16 @@ Resources:
                   - "s3:ListBucketMultipartUploads"
                 Resource:
                   - Fn::ImportValue: GitlabS3PoC-S3-S3BucketArn
+        -
+          PolicyName: "ReadCloudFormation"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement: 
+              - 
+                Effect: Allow
+                Action: 
+                  - "cloudformation:Describe*"
+                Resource: "*"
   GitlabS3RolePlofile:
     Type: AWS::IAM::InstanceProfile
     Properties:

@@ -568,6 +568,18 @@ scp .proxy_setting ec2-user@${GitlabIP}:/home/ec2-user
 
 #Gitlabにログイン
 ssh -A ec2-user@${GitlabIP}
+
+
+#AWS CLI初期化
+( . ~/.proxy_setting
+Region=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed -e 's/.$//')
+aws configure set region ${Region}
+aws configure set output json
+
+#動作確認
+aws sts get-caller-identity
+)
+
 ```
 ### (8)-(b) dockerセットアップ
 ```shell
@@ -598,6 +610,8 @@ mkdir .docker
 CONFIG='
 [Service]
 Environment="HTTP_PROXY='"${HTTP_PROXY}"'"
+Environment="HTTPS_PROXY='"${HTTP_PROXY}"'"
+Environment="NO_PROXY=localhost,127.0.0.1,gitlab"
 '
 sudo mkdir -p /etc/systemd/system/docker.service.d
 echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
@@ -609,287 +623,76 @@ cat /etc/systemd/system/docker.service.d/http-proxy.conf
 sudo systemctl daemon-reload
 sudo systemctl restart docker
 ```
+### (8)-(c) GitLabセットアップ
 gitlabのdockerイメージを取得する
 ```shell
 docker pull gitlab/gitlab-ce:13.5.4-ce.0
 ```
+DockerのBridgeネットワーク作成(クライアントからのアクセスを可能にするため)
+```shell
+docker network create gitlab_bridge
+docker network ls
+```
+Docker用のShared Volumeコンテナ作成
+```shell
+#Shared Volumeコンテナを作成
+docker run \
+  --name gitlab-datavol \
+  --restart=always \
+  --net gitlab_bridge \
+  --volume /home/web/docker/gitlab/config:/etc/gitlab:Z \
+  --volume /home/web/docker/gitlab/logs:/var/log/gitlab:Z \
+  --volume /home/web/docker/gitlab/data:/var/opt/gitlab:Z \
+  --volume /home/web/docker/gitlab-runner/config:/etc/gitlab-runner:Z \
+-itd alpine:3.12.1
 
+#確認(gitlab-datavolのコンテナが起動していることを確認)
+docker ps
+```
+GitLabコンテナ起動
+```shell
+bash
+. ~/.proxy_setting;
 
-
-
-
-
-
-
-
-
-ClientIP=$(aws --profile ${PROFILE} --output text \
+#情報取得
+PROFILE=default
+Region=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed -e 's/.$//')
+Bucket=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-Client \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-ExternalProxyIP=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-ExternalProxy \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-GitlabIP=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-Gitlab \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo -e "ClientIP      = ${ClientIP}\nEXternalProxy = ${ExternalProxyIP}\nGitlabIP      = ${GitlabIP}"
-#Clientにログイン
-ssh -A ec2-user@${ClientIP}
+        --stack-name GitlabS3PoC-S3 \
+        --query 'Stacks[].Outputs[?OutputKey==`S3BucketName`].[OutputValue]')
+echo -e "Bucket = ${Bucket}"
 
+#OMNIBUS_CONFIGURATIONの作成
+OMNIBUS_CONF="
+external_url 'http://gitlab:9010';
+registry_external_url 'http://gitlab:9011';
+registry['storage'] = {
+  's3' => {
+    'bucket' => '${Bucket}',
+    'region' => '${Region}',
+    'rootdirectory' => 'gitlab'
+  },
+  'cache' => {
+    'blobdescriptor' => 'inmemory'
+  },
+  'delete' => {
+    'enabled' => 'true'
+  }
+};
+unicorn['enable'] = false;
+puma['enable'] = true;"
+echo "$OMNIBUS_CONF"
 
-
-
-
-
-
-#ClientのPrivate IP取得
-GitlabIP=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-Gitlab \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo -e "GitlabIP = ${GitlabIP}"
-#Clientにログイン
-ssh -A ec2-user@${GitlabIP}
+#GitLabコンテナ起動
+docker run \
+  --name gitlab-core \
+  --restart=always \
+  --net gitlab_bridge \
+  --volumes-from gitlab-datavol \
+  --env GITLAB_OMNIBUS_CONFIG="${OMNIBUS_CONF}" \
+  --add-host=gitlab:172.20.64.119 \
+  --publish 9010:9010 \
+  --publish 9011:9011 \
+  --detach gitlab/gitlab-ce:13.5.4-ce.0
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-元のCloudFormationの作業を行っていたターミナルに戻り、Gitlabのインスタンスを作成します。
-手順は、https://docs.gitlab.com/ee/install/aws/を参考にしています。
-### (7)-(b) RDSセットアップ
-gitlab用のRDS(PostgreSQL)をセットアップします。
-```shell
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-Rds  \
-    --template-body "file://./cfns/rds.yaml";
-```
-### (7)-(c) gitlabインスタンス設定情報の入力
-```shell
-KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。  
-INSTANCE_TYPE="c5.xlarge"        #インスタンスタイプ設定
-
-#最新のGitlab CEのAMI IDを取得します。
-GITLAB_AMIID=$(aws --profile ${PROFILE} --output text \
-    ec2 describe-images \
-        --owners 782774275127 \
-        --filters 'Name=name,Values=GitLab EE*' \
-                  'Name=state,Values=available' \
-    --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
-echo -e "KEYNAME      = ${KEYNAME}\nINSTANCE_TYPE= ${INSTANCE_TYPE}\nGITLAB_AMIID = ${GITLAB_AMIID}"
-
-# VPC,SG情報取得
-PrivateSub1Id=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-GitlabVPC \
-        --query 'Stacks[].Outputs[?OutputKey==`PrivateSubnet1Id`].[OutputValue]')
-SG_ID=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-SecurityGroups \
-        --query 'Stacks[].Outputs[?OutputKey==`GitlabSGId`].[OutputValue]')
-GitLabRole=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-Iam \
-        --query 'Stacks[].Outputs[?OutputKey==`GitlabS3RolePlofile`].[OutputValue]' )
-echo -e "PrivateSub1Id= $PrivateSub1Id\nSG_ID        = ${SG_ID}\nGitLabRole   = ${GitLabRole}"
-```
-### (7)-(d) Gitlabサーバ
-```shell
-#タグ設定
-TAGJSON='
-[
-    {
-        "ResourceType": "instance",
-        "Tags": [
-            {
-                "Key": "Name",
-                "Value": "GitlabPoC-Gitlab"
-            }
-        ]
-    }
-]'
-
-# サーバの起動
-aws --profile ${PROFILE} --no-cli-pager \
-    ec2 run-instances \
-        --image-id ${GITLAB_AMIID} \
-        --instance-type ${INSTANCE_TYPE} \
-        --key-name ${KEYNAME} \
-        --iam-instance-profile "Name=${GitLabRole}" \
-        --subnet-id ${PrivateSub1Id} \
-        --security-group-ids ${SG_ID} \
-        --tag-specifications "${TAGJSON}";
-
-GitlabIP=$(aws --profile ${PROFILE} --output text \
-	  ec2 describe-instances \
-	    --filters \
-	      "Name=instance-state-name,Values=running" \
-	      "Name=tag:Name,Values=GitlabPoC-Gitlab" \
-	  --query 'Reservations[].Instances[].PrivateIpAddress')
-echo "GitlabIP = ${GitlabIP}"
-```
-
-## (8) Gitlabセットアップ-2 gitlabカスタム設定
-### (8)-(a) GitlabへのSSH接続
-- LinuxのBastionから、LinuxのClientにsshログインする
-- そこからGitlabにsshでログイン。ログインユーザは<code>ubuntu</code>。
-```shell
-# LinuxのClient
-ssh ubuntu@<GitlabのPrivateIP>
-
-Welcome to Ubuntu 16.04.7 LTS (GNU/Linux 4.4.0-1117-aws x86_64)
-
-* Documentation:  https://help.ubuntu.com
-* Management:     https://landscape.canonical.com
-* Support:        https://ubuntu.com/advantage
-```
-
-### (8)-(b) gitlab.rbの設定変更
-<code>/etc/gitlab/gitlab.rb</code>を特権ユーザで編集し、Let's Encryptを無効化します。
-```shell
-sudo vi /etc/gitlab/gitlab.rb
-```
-- Let's Encryptの無効化(公式マニュアルにしたがって設定)
-```rb
-letsencrypt['enable'] = false
-```
-- external url変更(これを変更しないと起動しなかったため)
-```rb
-#元は external_url '' とあり=がないので追加する。
-external_url = ''
-```
-- 設定ファイルの編集が完了し書き込み終了たらreconfigurateする。
-```shell
-sudo gitlab-ctl reconfigure
-sudo gitlab-ctl status
-```
-- reconfigurationが成功すると、gitlabサービスが起動する。
-- 80ポートでアクセス可能なため、WindowsのClientから<code>http://<gitlabのPrivate IP></code>で接続確認する。下記の画面が表示されればここまでの手順は問題ない。
-![Gitlab初期画面](./Documents/08-b_gitlab-inital.png)
-
-### (8)-(c) PostgreSQLの設定
-デフォルトではGitlab組み込みのPostgreSQLを利用しています。ここでは組み込みDBではなく、別途用意したrdsのPostgreSQLを利用するよう設定変更します。
-- PostgreSQLの接続確認をする
-```shell
-RDSEndpoint="<RDSのエンドポイントを設定>"
-sudo /opt/gitlab/embedded/bin/psql -U gitlab -h ${RDSEndpoint} -d gitlabhq_production
-
-#接続すると以下のような表示さがれる
-SSL connection (protocol: TLSv1.2, cipher: ECDHE-RSA-AES256-GCM-SHA384, bits: 256, compression: off)
-Type "help" for help.
-
-gitlabhq=> 
-```
-- extensionの作成
-```sql
-psql (10.9)
-Type "help" for help.
-
-gitlab=# CREATE EXTENSION pg_trgm;
-gitlab=# CREATE EXTENSION btree_gist;
-gitlab=# \q
-```
-- <code>/etc/gitlab/gitlab.rb</code>の設定変更
-```shell
-sudo vi /etc/gitlab/gitlab.rb
-```
-```rb
-# Disable the built-in Postgres
-postgresql['enable'] = false
-
-# Fill in the connection details
-gitlab_rails['db_adapter'] = "postgresql"
-gitlab_rails['db_encoding'] = "unicode"
-gitlab_rails['db_database'] = "gitlabhq_production"
-gitlab_rails['db_username'] = "gitlab"
-gitlab_rails['db_password'] = "mypassword"
-gitlab_rails['db_host'] = "<rds-endpoint>"
-```
-- 設定ファイルの編集が完了し書き込み終了たらreconfigurateする。
-```shell
-sudo gitlab-ctl reconfigure
-sudo gitlab-ctl status
-```
-### (8)-(d) Gitlab EEのTrial License Key設定
-S3アクセスを利用するためには、Gitlab EEライセンスが必要になります。ここでは、予め取得しておいたGitlab EEのTrial License Keyを入力してEE限定機能を解除します。(Trialは30日間になります)
-- Gitlab画面にアクセスし、rootユーザのパスワードを設定
-![Gitlab初期画面](./Documents/08-b_gitlab-inital.png)
-- ユーザ名<code>root</code>、先に設定したパスワードでGitlabにログインする
-- <b>Admin Area</b>から<b>License</b>を選び、予め取得したライセンスコードを登録する。詳しくは、[GitlabドキュメントのUploading your license](https://docs.gitlab.com/ee/user/admin_area/license.html)を参照。
-
-### (8)-(e) S3ストレージ利用
-GitlabでS3を利用するようにします。S3アクセス時の認証情報は、インスタンンスに付与したインスタンスロールを利用するようにします。
-- 設定ファイルをviで開く
-```shell
-sudo vi /etc/gitlab/gitlab.rb
-```
-- 下記設定を追加する
-```rb
-# Consolidated object storage configuration
-letsencrypt['enable'] = false
-external_url = ''
-
-# Disable the built-in Postgres
-postgresql['enable'] = false
-
-# Fill in the connection details
-gitlab_rails['db_adapter'] = "postgresql"
-gitlab_rails['db_encoding'] = "unicode"
-gitlab_rails['db_database'] = "gitlabhq_production"
-gitlab_rails['db_username'] = "gitlab"
-gitlab_rails['db_password'] = "mypassword"
-gitlab_rails['db_host'] = "gd1rqg75gzlcgjl.c15bz8qunqqh.ap-northeast-1.rds.amazonaws.com"
-
-# Consolidated object storage configuration
-gitlab_rails['object_store']['enabled'] = true
-gitlab_rails['object_store']['proxy_download'] = true
-gitlab_rails['object_store']['connection'] = {
-  'provider' => 'AWS',
-  'region' => 'ap-northeast-1',
-  'use_iam_profile' => true
-}
-
-gitlab_rails['object_store']['storage_options'] = {
-   'server_side_encryption' => 'AES256',
-}
-
-gitlab_rails['object_store']['objects']['artifacts']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-gitlab_rails['object_store']['objects']['external_diffs']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-gitlab_rails['object_store']['objects']['lfs']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-gitlab_rails['object_store']['objects']['uploads']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-gitlab_rails['object_store']['objects']['packages']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-gitlab_rails['object_store']['objects']['dependency_proxy']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-gitlab_rails['object_store']['objects']['terraform_state']['bucket'] = "gitlabs3poc-s3-s3bucket-13yuuqyukzw3d"
-
-gitlab_rails['artifacts_object_store_enabled'] = true
-gitlab_rails['external_diffs_object_store_enabled'] = true
-gitlab_rails['lfs_object_store_enabled'] = true
-gitlab_rails['uploads_object_store_enabled'] = true
-gitlab_rails['packages_object_store_enabled'] = true
-
-gitlab_rails['backup_upload_connection'] = {
-  'provider' => 'AWS',
-  'region' => 'ap-northeast-1',
-  'use_iam_profile' => true
-}
-gitlab_rails['backup_upload_remote_directory'] = 'gitlabs3poc-s3-s3bucket-13yuuqyukzw3d'
-```
-
-
-gitlabpocgitlabdbms
-
-
-https://qiita.com/supertaihei02/items/8c7b12b406cb6a1517a2

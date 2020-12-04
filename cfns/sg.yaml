@@ -21,29 +21,13 @@ Resources:
       Tags:
         - Key: Name
           Value: GitlabVPC-InstanceSG
-  GitlabSGReceivHttps:
+  GitlabSGReceivGitlabPort:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
       GroupId: !Ref GitlabSG
       IpProtocol: tcp
-      FromPort: 443
-      ToPort: 443
-      CidrIp: 0.0.0.0/0
-  GitlabSGReceivHttp:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref GitlabSG
-      IpProtocol: tcp
-      FromPort: 80
-      ToPort: 80
-      CidrIp: 0.0.0.0/0
-  GitlabSGReceivLB:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref GitlabSG
-      IpProtocol: tcp
-      FromPort: 8075
-      ToPort: 8075
+      FromPort: 9010
+      ToPort: 9011
       CidrIp: 0.0.0.0/0
   GitlabSGReceivSsh:
     Type: AWS::EC2::SecurityGroupIngress
