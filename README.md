@@ -265,8 +265,8 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/iam.yaml" \
     --capabilities CAPABILITY_IAM ;
 ```
-## (5) Linuxクライアントインスタンスの作成
-### (5)-(a) 情報設定
+## (6) インスタンスセットアップ(Bastion/Proxy/CLient)
+### (6)-(a) 情報設定
 ```shell
 KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
 AL2_AMIID=$(aws --profile ${PROFILE} --output text \
@@ -277,7 +277,7 @@ AL2_AMIID=$(aws --profile ${PROFILE} --output text \
         --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
 echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${AL2_AMIID}"
 ```
-### (5)-(b) Bastionインスタンス作成
+### (6)-(b) Bastionインスタンス作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -298,7 +298,27 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/bastion.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (5)-(c) Clientインスタンス作成
+### (6)-(c) External-Proxyインスタンス作成
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${AL2_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create External Proxy
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-ExternalProxy  \
+    --template-body "file://./cfns/external-proxy.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (6)-(d) Clientインスタンス作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -319,7 +339,28 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/client.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (5)-(d) ログイン確認とClientへのgitインストール
+### (6)-(e) Gitlabインスタンス作成
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${AL2_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create Bastion
+
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-Gitlab  \
+    --template-body "file://./cfns/gitlab.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (6)-(f) ログイン確認
 別ターミナルを起動し下記を実行して作成したインスタンスにログイン可能かを確認します。
 ```shell
 #別ターミナルを起動し下記を実行
@@ -360,20 +401,59 @@ ClientIP=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-Client \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo "ClientIP = ${ClientIP}"
-
+ExternalProxyIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-ExternalProxy \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "ClientIP      = ${ClientIP}\nEXternalProxy = ${ExternalProxyIP}\nGitlabIP      = ${GitlabIP}"
 #Clientにログイン
 ssh -A ec2-user@${ClientIP}
+
+#External-Proxyにログイン
+ssh -A ec2-user@${ExternalProxyIP}
 ```
-Clientにログインできたいら、gitをインストールする
+### (6)-(g) クライアントセットアップ
+Clientにログインし、awscli初期設定、git/dockerをインストールする
 ```shell
+#Proxy設定
+PROXY_IP=<CloudFormationの出力からInstancePrivateIpを確認>
+
+cat >> .proxy_setting << EOL
+export HTTP_PROXY=http://${PROXY_IP}:3128
+export HTTPS_PROXY=http://${PROXY_IP}:3128
+export NO_PROXY=169.254.169.254
+EOL
+. .proxy_setting
+
+#AWS CLI初期化
+Region=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed -e 's/.$//')
+aws configure set region ${Region}
+aws configure set output json
+
+#動作確認
+aws sts get-caller-identity
+
+#パッケージの最新化
+sudo yum -y update
+
 #gitをインストール
 sudo yum -y install git
+
+#install docker
+sudo amazon-linux-extras install -y docker
+sudo service docker start
+sudo usermod -a -G docker ec2-user
+sudo systemctl enable docker
+sudo service docker restart
 ```
 
-## (6) Windowsクライアントインスタンスの作成
+## (7) Windowsクライアントインスタンスの作成
 元のCloudFormationの作業を行っていたターミナルに戻り、Windowsの踏み台をClientを作成する
-### (6)-(a) 情報設定
+### (7)-(a) 情報設定
 ```shell
 KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
 WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
@@ -384,7 +464,7 @@ WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
         --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
 echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${WIN2019_AMIID}"
 ```
-### (6)-(b) Windows Bastion
+### (7)-(b) Windows Bastion
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -404,7 +484,7 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/bastion.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (6)-(c) Windows Client
+### (7)-(c) Windows Client作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -424,39 +504,170 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/client.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (6)-(d)セットアップ
+### (7)-(d)セットアップ
 - BastionにRDPでログインする。
 - ClientにRDPログインする。
 - ClientにRDPをセットアップする
-  - Linux BastionでCrhomをダウンロードする
-  ```shell
-  curl -OL https://dl.google.com/tag/s/appguid%3D%7B8A69D345-D564-463C-AFF1-A69D9E530F96%7D%26iid%3D%7BF562C505-772C-7993-3E76-C49E22834DC7%7D%26lang%3Den%26browser%3D4%26usagestats%3D0%26appname%3DGoogle%2520Chrome%26needsadmin%3Dtrue%26ap%3Dx64-stable-statsdef_0%26brand%3DGCEB/dl/chrome/install/GoogleChromeEnterpriseBundle64.zip
-  ```
-  - Windows Clientに移動しsshログインをセットアップする
-  ```ps
-  mkdir .ssh
-  cd .ssh
-  notepad id_rsa
-  <メモ帳が開いたら秘密鍵を設定して保存する>
+  - PowerShellを起動する
+  ```powershell
+  $proxy = "http://10.1.59.155:3128"
+  $url = "https://dl.google.com/tag/s/appguid%3D%7B8A69D345-D564-463C-AFF1-A69D9E530F96%7D%26iid%3D%7BF562C505-772C-7993-3E76-C49E22834DC7%7D%26lang%3Den%26browser%3D4%26usagestats%3D0%26appname%3DGoogle%2520Chrome%26needsadmin%3Dtrue%26ap%3Dx64-stable-statsdef_0%26brand%3DGCEB/dl/chrome/install/GoogleChromeEnterpriseBundle64.zip"
+  $output = "GoogleChromeEnterpriseBundle64.zip"
+  
+  Invoke-WebRequest -Proxy $proxy -Uri $url -OutFile $output
 
-  notepad config
-  <メモ帳が開いたら下記を設定する>
-  Host hoge
-    HostName <BastionLinuxのPrivateIP>
-    port 22
-    User ec2-user
-    Protocol 2
-    IdentityFile C:\Users\Administrator\.ssh\id_rsa
+  Expand-Archive -Path　$output
+
+  GoogleChromeEnterpriseBundle64\Installers\GoogleChromeStandaloneEnterprise64.msi
   ```
-  - Basion LinuxからChromをscpで取得する
-  ```ps
-   scp ec2-user@10.1.30.232:/home/ec2-user/GoogleChromeEnterpriseBundle64.zip .
-  ```
-  - zipを解凍して、Installersの<code>GoogleChromeStandaloneEnterprise64</code>でchromをセットアップをする
+
+## (8) Gitlabセットアップ-1 インスタンスのセットアップ
+### (8)-(a) Gitlabインスタンスへのログイン
+別ターミナルを起動し下記を実行してBastionにログインする。
+```shell
+#別ターミナルを起動し下記を実行
+
+#初期化
+export PROFILE=default #デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
+export REGION=$(aws --profile ${PROFILE} configure get region)
+echo "${PROFILE}  ${REGION}"
+
+#BastionのPublic IP取得
+BastionIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Bastion \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePublicIp`].[OutputValue]')
+echo "BastionIP = ${BastionIP}"
+
+#Bastionにログイン
+ssh-add
+ssh -A ec2-user@${BastionIP}
+```
+Bastionにログインしたら、そこからGitlabにログインする
+```shell
+PROFILE=default
+ClientIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Client \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "ClientIP      = ${ClientIP}"
+#Clientにログイン
+ssh -A ec2-user@${ClientIP}
+```
+Clientから、Gitlabにログインする
+```shell
+PROFILE=default
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "GitlabIP      = ${GitlabIP}"
+
+#Clientで作成したPROXY設定を、Gitlabインスタンスにコピーする
+scp .proxy_setting ec2-user@${GitlabIP}:/home/ec2-user
+
+#Gitlabにログイン
+ssh -A ec2-user@${GitlabIP}
+```
+### (8)-(b) dockerセットアップ
+```shell
+#docker setup
+sudo yum update -y
+sudo amazon-linux-extras install -y docker
+
+sudo service docker start
+sudo usermod -a -G docker ec2-user
+sudo systemctl enable docker
+sudo service docker restart
+
+exit
+```
+dockerグループへの所属を反映させるため再度、Clientからgitlabにログインする。
+```shell
+ ssh -A ec2-user@${GitlabIP}
+```
+Gitlabインスタンスへログイン後
+```shell
+#ec2-useからdockerコマンドが実行できることを確認(エラーが出なければOK)
+docker ps
+```
+DockerのProxy設定
+```shell
+mkdir .docker
+(. .proxy_setting;
+CONFIG='
+[Service]
+Environment="HTTP_PROXY='"${HTTP_PROXY}"'"
+'
+sudo mkdir -p /etc/systemd/system/docker.service.d
+echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
+)
+#設定の確認
+cat /etc/systemd/system/docker.service.d/http-proxy.conf
+
+#デーモン再起動
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+gitlabのdockerイメージを取得する
+```shell
+docker pull gitlab/gitlab-ce:13.5.4-ce.0
+```
 
 
-## (7) Gitlabセットアップ-1 インスタンスのセットアップ
-### (7)-(a) Gitlabインスタンスの作成
+
+
+
+
+
+
+
+
+ClientIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Client \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+ExternalProxyIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-ExternalProxy \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "ClientIP      = ${ClientIP}\nEXternalProxy = ${ExternalProxyIP}\nGitlabIP      = ${GitlabIP}"
+#Clientにログイン
+ssh -A ec2-user@${ClientIP}
+
+
+
+
+
+
+
+#ClientのPrivate IP取得
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "GitlabIP = ${GitlabIP}"
+#Clientにログイン
+ssh -A ec2-user@${GitlabIP}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 元のCloudFormationの作業を行っていたターミナルに戻り、Gitlabのインスタンスを作成します。
 手順は、https://docs.gitlab.com/ee/install/aws/を参考にしています。
 ### (7)-(b) RDSセットアップ
