@@ -108,6 +108,7 @@ Resources:
           #/etc/squid/whitelist
           cat > /etc/squid/whitelist << EOL
           #for docker Hub
+          .docker.com
           .docker.io
           docker-images-prod.s3.amazonaws.com
           
@@ -124,6 +125,10 @@ Resources:
 
           #for debug
           .google.co.jp
+
+          #allow aws services
+          sts.amazonaws.com
+          cloudformation.*.amazonaws.com
           EOL
 
           # setup auto start
