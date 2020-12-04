@@ -39,6 +39,8 @@ Resources:
       ImageId: !Ref AmiId
       InstanceType: !Ref InstanceType
       KeyName: !Ref KEYNAME
+      IamInstanceProfile:
+        Fn::ImportValue: GitlabS3PoC-Iam-GitlabS3RolePlofile
       Monitoring: yes
       NetworkInterfaces:
         - DeviceIndex: '0'
