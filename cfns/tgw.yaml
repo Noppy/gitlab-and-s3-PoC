@@ -58,6 +58,15 @@ Resources:
       DestinationCidrBlock:
         Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
       TransitGatewayId: !Ref Tgw
+  ClientVpcPublicSubnet:
+    Type: AWS::EC2::Route
+    DependsOn: TgwAttachClientVpc
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: GitlabS3PoC-ClientVPC-PublicSubnetRouteTableId
+      DestinationCidrBlock:
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
+      TransitGatewayId: !Ref Tgw
   #--
   GitlabVpCPrivateSubnet1:
     Type: AWS::EC2::Route
