@@ -605,7 +605,6 @@ docker ps
 ```
 DockerのProxy設定
 ```shell
-mkdir .docker
 (. .proxy_setting;
 CONFIG='
 [Service]
@@ -695,4 +694,77 @@ docker run \
   --publish 9010:9010 \
   --publish 9011:9011 \
   --detach gitlab/gitlab-ce:13.5.4-ce.0
+```
+### (8)-(d)GitLabアクセステスト
+Windows ClientのChromeから、下記URLにアクセスし、GitLabのrootユーザパスワード変更画面が表示されることを確認する。
+```shell
+http://<gitlabインスタンスのIP>:9010
+```
+- chromでGitLabのパスワード変更画面が表示されたら、下記オペレーションでパスワードの変更を行う。
+  - rootユーザのパスワードを設定する
+  - rootユーザでログインする
+  - ユーザアカウントを作成する(次のPushで利用する)
+    - Name: testusera
+    - Username: testusera
+    - Email: testusera@dummy.com
+    - Password: 任意のパスワード
+## (9)Docker レジストリ動作テスト
+### (9)-(a)プロジェクトの作成
+- Windows ClientのChromeから<code>testusera</code>でGitLabにログインする
+- 「New Project」で空のプロジェクト・リポジトリを作成する(ex, "docker_test")
+### (9)-(b)docker pushのテスト
+- Linux Clientにログインする
+- DockerにProxy設定をする
+```shell
+. ~/.proxy_setting;
+# GitlabインスタンスのPrivateIP取得
+PROFILE=default
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+#dockerのProxy設定
+CONFIG='
+[Service]
+Environment="HTTP_PROXY='"${HTTP_PROXY}"'"
+Environment="HTTPS_PROXY='"${HTTP_PROXY}"'"
+Environment="NO_PROXY=localhost,127.0.0.1,gitlab,'"${GitlabIP}"'"
+'
+sudo mkdir -p /etc/systemd/system/docker.service.d
+echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
+
+#設定の確認
+cat /etc/systemd/system/docker.service.d/http-proxy.conf
+
+#dockerにhttpアクセスの例外設定を追加
+CONFIG='{
+ "insecure-registries": ["'"${GitlabIP}"':9011"]
+}'
+echo "${CONFIG}" | sudo tee /etc/docker/daemon.json
+cat /etc/docker/daemon.json
+
+#デーモン再起動
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+
+#/etc/hostsにgitlabを追加
+echo "${GitlabIP} gitlab" | sudo tee -a /etc/hosts
+```
+- ダミーのイメージを GitLab内蔵Docker RegisitoryにPushする
+```shell
+# GitlabインスタンスのPrivateIP取得
+PROFILE=default
+GitlabIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo "GitlabIP = ${GitlabIP}"
+
+#docker alpineをDocker HubからPullする
+docker pull alpine
+docker image ls
+
+docker tag alpine:latest ${GitlabIP}:9011/testusera/docker_test
+docker login ${GitlabIP}:9011 -u testusera
+docker push ${GitlabIP}:9011/testusera/docker_test
 ```
