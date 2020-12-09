@@ -298,7 +298,28 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/bastion.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (6)-(c) External-Proxyインスタンス作成
+### (6)-(c) Proxyインスタンス作成
+- External-Proxy
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${AL2_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"◊
+  }
+]'
+# Create External Proxy
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-ExternalProxy  \
+    --template-body "file://./cfns/external-proxy.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+- Internal-Proxy
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -314,10 +335,11 @@ CFN_STACK_PARAMETERS='
 ]'
 # Create External Proxy
 aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-ExternalProxy  \
-    --template-body "file://./cfns/external-proxy.yaml" \
+    --stack-name GitlabS3PoC-InternalProxy  \
+    --template-body "file://./cfns/Internal-proxy.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
+
 ### (6)-(d) Clientインスタンス作成
 ```shell
 # Set Stack Parameters

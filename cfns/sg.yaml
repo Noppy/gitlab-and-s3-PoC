@@ -118,6 +118,33 @@ Resources:
       FromPort: 3128
       ToPort: 3128
       CidrIp: 10.0.0.0/8
+  #--
+  InternalProxySG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: GitlabVPC-InternalProxySG
+      GroupDescription: SG for external proxy instances
+      VpcId: 
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcId
+      Tags:
+        - Key: Name
+          Value: GitlabVPC-InternalProxySG
+  InternalProxySGSsh:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InternalProxySG
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 0.0.0.0/0
+  InternalProxySGSProxy:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref InternalProxySG
+      IpProtocol: tcp
+      FromPort: 3128
+      ToPort: 3128
+      CidrIp: 10.0.0.0/8
 Outputs:
   #------------------ VPC
   GitlabSGId:
@@ -140,3 +167,8 @@ Outputs:
     Value: !Ref ExternalProxySG
     Export:
       Name: !Sub "${AWS::StackName}-ExternalProxySGId"
+  InternalProxySGId:
+    Description:  InternalProxySG ID
+    Value: !Ref InternalProxySG
+    Export:
+      Name: !Sub "${AWS::StackName}-InternalProxySGId"
