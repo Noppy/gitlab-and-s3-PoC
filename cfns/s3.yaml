@@ -75,3 +75,12 @@ Outputs:
     Value: !GetAtt S3Bucket.Arn
     Export:
       Name: !Sub "${AWS::StackName}-S3BucketArn"
+  S3BucketRegionalDomainName:
+    Description: S3Bucket Regional Domain Name
+    Value: !GetAtt S3Bucket.RegionalDomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-S3BucketRegionalDomainName"
+
+
+
+
