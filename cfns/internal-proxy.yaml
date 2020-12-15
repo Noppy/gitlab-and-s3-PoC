@@ -102,7 +102,7 @@ Resources:
               - "cache_peer "
               - Fn::ImportValue: GitlabS3PoC-ExternalProxy-InstancePrivateIp
               - " parent 3128 0 proxy-only\n"
-              - "acl lab_internal dstdomain gitlab "/etc/squid/direct_access_list\n"
+              - "acl lab_internal dstdomain /etc/squid/direct_access_list\n"
               - "cache_peer_access "
               - Fn::ImportValue: GitlabS3PoC-ExternalProxy-InstancePrivateIp
               - " allow !lab_internal\n"
@@ -122,7 +122,8 @@ Resources:
 
                 #/etc/squid/direct_access_list
                 cat > /etc/squid/direct_access_list << EOL
-                gitlab
+              - Fn::ImportValue: GitlabS3PoC-Gitlab-InstanceDns
+              - "\n"
               - Fn::ImportValue: GitlabS3PoC-Gitlab-InstancePrivateIp
               - "\n"
               - Fn::ImportValue: GitlabS3PoC-S3-S3BucketRegionalDomainName

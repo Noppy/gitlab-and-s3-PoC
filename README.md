@@ -337,14 +337,19 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/s3.yaml" ;
 ```
 ## (5) IAMロール作成
-
 ```shell
+# S3バケット作成のCloudFormationの完了まで待ちます。
+aws --profile ${PROFILE} cloudformation wait \
+    stack-create-complete \
+      --stack-name GitlabS3PoC-S3
+
+#　IAMロール作成
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-Iam \
     --template-body "file://./cfns/iam.yaml" \
     --capabilities CAPABILITY_IAM ;
 ```
-## (6) インスタンスセットアップ(Bastion/Proxy/CLient)
+## (6) インスタンスセットアップ(Bastion/Proxy/Client)
 ### (6)-(a) 情報設定
 ```shell
 KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
@@ -354,9 +359,16 @@ AL2_AMIID=$(aws --profile ${PROFILE} --output text \
         --filters 'Name=name,Values=amzn2-ami-hvm-2.0.????????.?-x86_64-gp2' \
                   'Name=state,Values=available' \
         --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
-echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${AL2_AMIID}"
+
+WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
+    ec2 describe-images \
+        --owners amazon \
+        --filters 'Name=name,Values=Windows_Server-2019-Japanese-Full-Base-????.??.??' \
+                  'Name=state,Values=available' \
+        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
+echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${AL2_AMIID}\nAL2_AMIID = ${WIN2019_AMIID}"
 ```
-### (6)-(b) Bastionインスタンス作成
+### (6)-(b) ExternalVPC Bastion(Linux)インスタンス作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -377,28 +389,28 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/bastion.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (6)-(c) Proxyインスタンス作成
-- External-Proxy
+### (6)-(c) ExternalVPC Bastion(Windows)インスタンス作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
 [
   {
     "ParameterKey": "AmiId",
-    "ParameterValue": "'"${AL2_AMIID}"'"
+    "ParameterValue": "'"${WIN2019_AMIID}"'"
   },
   {
     "ParameterKey": "KEYNAME",
-    "ParameterValue": "'"${KEYNAME}"'"◊
+    "ParameterValue": "'"${KEYNAME}"'"
   }
 ]'
-# Create External Proxy
+# Create Bastion
 aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-ExternalProxy  \
-    --template-body "file://./cfns/external-proxy.yaml" \
+    --stack-name GitlabS3PoC-BastionWin  \
+    --template-body "file://./cfns/bastion.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-- Internal-Proxy
+### (6)-(d) ExternalVPC ExternalProxyインスタンス作成
+- External-Proxy
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -414,12 +426,11 @@ CFN_STACK_PARAMETERS='
 ]'
 # Create External Proxy
 aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-InternalProxy  \
-    --template-body "file://./cfns/Internal-proxy.yaml" \
+    --stack-name GitlabS3PoC-ExternalProxy  \
+    --template-body "file://./cfns/external-proxy.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-
-### (6)-(d) Clientインスタンス作成
+### (6)-(e) ClientVPC Client(Linux)作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -434,13 +445,32 @@ CFN_STACK_PARAMETERS='
   }
 ]'
 # Create Bastion
-
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-Client  \
     --template-body "file://./cfns/client.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
-### (6)-(e) Gitlabインスタンス作成
+### (6)-(f) ClientVPC Client(Windows)作成
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${WIN2019_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create Bastion
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-ClientWin  \
+    --template-body "file://./cfns/client.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+### (6)-(g) GitlabVPC Gitlabインスタンス作成
 ```shell
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
@@ -461,6 +491,32 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/gitlab.yaml" \
     --parameters "${CFN_STACK_PARAMETERS}";
 ```
+### (6)-(h) GitlabVPC Internal-Proxyインスタンス作成
+```shell
+# Set Stack Parameters
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "AmiId",
+    "ParameterValue": "'"${AL2_AMIID}"'"
+  },
+  {
+    "ParameterKey": "KEYNAME",
+    "ParameterValue": "'"${KEYNAME}"'"
+  }
+]'
+# Create External Proxy
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-InternalProxy  \
+    --template-body "file://./cfns/Internal-proxy.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}";
+```
+
+
+
+
+## (7) OSセットアップ
+
 ### (6)-(f) ログイン確認
 別ターミナルを起動し下記を実行して作成したインスタンスにログイン可能かを確認します。
 ```shell
@@ -565,46 +621,12 @@ WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
         --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
 echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${WIN2019_AMIID}"
 ```
-### (7)-(b) Windows Bastion
-```shell
-# Set Stack Parameters
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "AmiId",
-    "ParameterValue": "'"${WIN2019_AMIID}"'"
-  },
-  {
-    "ParameterKey": "KEYNAME",
-    "ParameterValue": "'"${KEYNAME}"'"
-  }
-]'
-# Create Bastion
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-BastionWin  \
-    --template-body "file://./cfns/bastion.yaml" \
-    --parameters "${CFN_STACK_PARAMETERS}";
-```
-### (7)-(c) Windows Client作成
-```shell
-# Set Stack Parameters
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "AmiId",
-    "ParameterValue": "'"${WIN2019_AMIID}"'"
-  },
-  {
-    "ParameterKey": "KEYNAME",
-    "ParameterValue": "'"${KEYNAME}"'"
-  }
-]'
-# Create Bastion
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-ClientWin  \
-    --template-body "file://./cfns/client.yaml" \
-    --parameters "${CFN_STACK_PARAMETERS}";
-```
+
+
+
+
+
+
 ### (7)-(d)セットアップ
 - BastionにRDPでログインする。
 - ClientにRDPログインする。
