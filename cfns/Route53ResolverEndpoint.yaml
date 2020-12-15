@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: Deploy Route53 Resolver Outbound endpoints in the Gitlab VPC
+Description: Deploy Route53 Resolver Inbound endpoints in the Gitlab VPC
 #----------------------------------------------
 Resources:
   ResolverEndpointSg:
@@ -29,11 +29,11 @@ Resources:
       ToPort: 53
       CidrIp: 0.0.0.0/0
   #-----
-  ResolverOutboundEndpoint:
+  ResolverInboundEndpoint:
     Type : AWS::Route53Resolver::ResolverEndpoint
     Properties :
-      Name : GitlabOutboundEndpoint
-      Direction : OUTBOUND
+      Name : GitlabInboundEndpoint
+      Direction : INBOUND
       IpAddresses : 
         - SubnetId:
             Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet1Id
@@ -43,16 +43,16 @@ Resources:
         - !Ref ResolverEndpointSg
       Tags : 
         - Key: Name
-          Value: GitlabOutboundEndpoint
+          Value: GitlabInboundEndpoint
 #----------------------------------------------
 Outputs:
-  ResolverOutboundEndpointEndpointId:
-    Description: Endpoint ID of the Resolver Outbound Endpoint 
-    Value: !GetAtt ResolverOutboundEndpoint.ResolverEndpointId
+  ResolverInboundEndpointEndpointId:
+    Description: Endpoint ID of the Resolver Inbound Endpoint 
+    Value: !GetAtt ResolverInboundEndpoint.ResolverEndpointId
     Export:
-      Name: !Sub "${AWS::StackName}-ResolverOutboundEndpointEndpointId"
-  ResolverOutboundEndpointArn:
-    Description: Arn of the Resolver Outbound Endpoint 
-    Value: !GetAtt ResolverOutboundEndpoint.Arn
+      Name: !Sub "${AWS::StackName}-ResolverInboundEndpointEndpointId"
+  ResolverInboundEndpointArn:
+    Description: Arn of the Resolver Inbound Endpoint 
+    Value: !GetAtt ResolverInboundEndpoint.Arn
     Export:
-      Name: !Sub "${AWS::StackName}-ResolverOutboundEndpointArn"
+      Name: !Sub "${AWS::StackName}-ResolverInboundEndpointArn"

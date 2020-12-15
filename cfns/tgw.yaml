@@ -22,8 +22,8 @@ Resources:
       VpcId:
         Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcId
       SubnetIds: 
-        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet1Id
-        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet2Id
+        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PublicSubnet1Id
+        - Fn::ImportValue: GitlabS3PoC-ClientVPC-PublicSubnet2Id
       Tags:
         - Key: Name
           Value: GitlabS3PoC-Tgw-ClientVPC
@@ -39,6 +39,19 @@ Resources:
       Tags:
         - Key: Name
           Value: GitlabS3PoC-Tgw-GitlabVPC
+  TgwAttachExternalVpc:
+    Type: AWS::EC2::TransitGatewayAttachment
+    Properties: 
+      TransitGatewayId: !Ref Tgw
+      VpcId:
+        Fn::ImportValue: GitlabS3PoC-ExternalVPC-VpcId
+      SubnetIds: 
+        - Fn::ImportValue: GitlabS3PoC-ExternalVPC-PrivateSubnet1Id
+        - Fn::ImportValue: GitlabS3PoC-ExternalVPC-PrivateSubnet2Id
+      Tags:
+        - Key: Name
+          Value: GitlabS3PoC-Tgw-ExternalVPC
+
   #------------------ Route for VPC
   ClientVpcPrivateSubnet1:
     Type: AWS::EC2::Route
@@ -46,8 +59,7 @@ Resources:
     Properties:
       RouteTableId:
         Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet1RouteTableId
-      DestinationCidrBlock:
-        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
+      DestinationCidrBlock: 10.0.0.0/8
       TransitGatewayId: !Ref Tgw
   ClientVpcPrivateSubnet2:
     Type: AWS::EC2::Route
@@ -55,17 +67,7 @@ Resources:
     Properties:
       RouteTableId:
         Fn::ImportValue: GitlabS3PoC-ClientVPC-PrivateSubnet2RouteTableId
-      DestinationCidrBlock:
-        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
-      TransitGatewayId: !Ref Tgw
-  ClientVpcPublicSubnet:
-    Type: AWS::EC2::Route
-    DependsOn: TgwAttachClientVpc
-    Properties:
-      RouteTableId:
-        Fn::ImportValue: GitlabS3PoC-ClientVPC-PublicSubnetRouteTableId
-      DestinationCidrBlock:
-        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcCidr
+      DestinationCidrBlock: 10.0.0.0/8
       TransitGatewayId: !Ref Tgw
   #--
   GitlabVpCPrivateSubnet1:
@@ -74,8 +76,7 @@ Resources:
     Properties:
       RouteTableId:
         Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet1RouteTableId
-      DestinationCidrBlock:
-        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcCidr
+      DestinationCidrBlock: 10.0.0.0/8
       TransitGatewayId: !Ref Tgw
   GitlabVpCPrivateSubnet2:
     Type: AWS::EC2::Route
@@ -83,6 +84,14 @@ Resources:
     Properties:
       RouteTableId:
         Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet2RouteTableId
-      DestinationCidrBlock:
-        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcCidr
+      DestinationCidrBlock: 10.0.0.0/8
+      TransitGatewayId: !Ref Tgw
+  #------------------ Route for VPC
+  ExternalVpcPublicSubnet:
+    Type: AWS::EC2::Route
+    DependsOn: TgwAttachExternalVpc
+    Properties:
+      RouteTableId:
+        Fn::ImportValue: GitlabS3PoC-ExternalVPC-PublicSubnetRouteTableId
+      DestinationCidrBlock: 10.0.0.0/8
       TransitGatewayId: !Ref Tgw
