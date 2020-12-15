@@ -45,9 +45,9 @@ Resources:
       NetworkInterfaces:
         - DeviceIndex: '0'
           SubnetId:
-            Fn::ImportValue: GitlabS3PoC-ClientVPC-PublicSubnet1Id
+            Fn::ImportValue: GitlabS3PoC-ExternalVPC-PublicSubnet1Id
           GroupSet:
-            - Fn::ImportValue: GitlabS3PoC-SecurityGroups-ClientSGId
+            - Fn::ImportValue: GitlabS3PoC-SecurityGroups-BastionSGId
           # AssociatePublicIpAddress: true
       Tags:
         - Key: Name
@@ -58,7 +58,6 @@ Resources:
           # Update ALL rpms, and change hostname to Userfrendly name 
           yum -y update
           hostnamectl set-hostname "GitlabPoc-Bastion"
-
   BastionRecovery:
     Type: AWS::CloudWatch::Alarm
     Condition: CheckAutoRecovery

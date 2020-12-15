@@ -43,7 +43,7 @@ Resources:
       NetworkInterfaces:
         - DeviceIndex: '0'
           SubnetId:
-            Fn::ImportValue: GitlabS3PoC-ClientVPC-PublicSubnet2Id
+            Fn::ImportValue: GitlabS3PoC-ExternalVPC-PublicSubnet1Id
           GroupSet:
             - Fn::ImportValue: GitlabS3PoC-SecurityGroups-ExternalProxySGId
           # AssociatePublicIpAddress: true
