@@ -168,32 +168,32 @@ Resources:
 Outputs:
   #------------------ VPC
   GitlabSGId:
-    Description:  GitlabSG ID
+    Description: GitlabSG ID
     Value: !Ref GitlabSG
     Export:
       Name: !Sub "${AWS::StackName}-GitlabSGId"
   RdsSGId:
-    Description:  RdsSG ID
+    Description: RdsSG ID
     Value: !Ref RdsSG
     Export:
       Name: !Sub "${AWS::StackName}-RdsSGId"
   ClientSGId:
-    Description:  ClientSG ID
+    Description: ClientSG ID
     Value: !Ref ClientSG
     Export:
       Name: !Sub "${AWS::StackName}-ClientSGId"
   BastionSGId:
-    Description:  BastionSG ID
+    Description: BastionSG ID
     Value: !Ref BastionSG
     Export:
       Name: !Sub "${AWS::StackName}-BastionSGId"
   ExternalProxySGId:
-    Description:  ExternalProxySG ID
+    Description: ExternalProxySG ID
     Value: !Ref ExternalProxySG
     Export:
       Name: !Sub "${AWS::StackName}-ExternalProxySGId"
   InternalProxySGId:
-    Description:  InternalProxySG ID
+    Description: InternalProxySG ID
     Value: !Ref InternalProxySG
     Export:
       Name: !Sub "${AWS::StackName}-InternalProxySGId"
