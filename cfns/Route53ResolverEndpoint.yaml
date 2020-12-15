@@ -1,0 +1,58 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploy Route53 Resolver Outbound endpoints in the Gitlab VPC
+#----------------------------------------------
+Resources:
+  ResolverEndpointSg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: GitlabVPC-ResolverEndpointSg
+      GroupDescription: SG for ResolverEndpointSg
+      VpcId: 
+        Fn::ImportValue: GitlabS3PoC-GitlabVPC-VpcId
+      Tags:
+        - Key: Name
+          Value: GitlabVPC-ResolverEndpointSg
+  ResolverEndpointSgDnsTcp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ResolverEndpointSg
+      IpProtocol: tcp
+      FromPort: 53
+      ToPort: 53
+      CidrIp: 0.0.0.0/0
+  ResolverEndpointSgDnsUdp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ResolverEndpointSg
+      IpProtocol: udp
+      FromPort: 53
+      ToPort: 53
+      CidrIp: 0.0.0.0/0
+  #-----
+  ResolverOutboundEndpoint:
+    Type : AWS::Route53Resolver::ResolverEndpoint
+    Properties :
+      Name : GitlabOutboundEndpoint
+      Direction : OUTBOUND
+      IpAddresses : 
+        - SubnetId:
+            Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet1Id
+        - SubnetId:
+            Fn::ImportValue: GitlabS3PoC-GitlabVPC-PrivateSubnet2Id
+      SecurityGroupIds : 
+        - !Ref ResolverEndpointSg
+      Tags : 
+        - Key: Name
+          Value: GitlabOutboundEndpoint
+#----------------------------------------------
+Outputs:
+  ResolverOutboundEndpointEndpointId:
+    Description: Endpoint ID of the Resolver Outbound Endpoint 
+    Value: !GetAtt ResolverOutboundEndpoint.ResolverEndpointId
+    Export:
+      Name: !Sub "${AWS::StackName}-ResolverOutboundEndpointEndpointId"
+  ResolverOutboundEndpointArn:
+    Description: Arn of the Resolver Outbound Endpoint 
+    Value: !GetAtt ResolverOutboundEndpoint.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ResolverOutboundEndpointArn"
