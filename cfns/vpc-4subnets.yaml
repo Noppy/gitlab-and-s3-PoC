@@ -58,6 +58,23 @@ Parameters:
       - true
       - false
   #---
+  DhcpOptionsDomainNameServers1:
+    Description: "The IPv4 addresses of a 1st domain name servers, or AmazonProvidedDNS"
+    Type: String
+    Default: "AmazonProvidedDNS"
+  DhcpOptionsDomainNameServers2:
+    Description: "The IPv4 addresses of a 2nd domain name servers, or Blank"
+    Type: String
+    Default: ""
+  DhcpOptionsNtpServers1:
+    Description: "The IPv4 addresses of a 1st Network Time Protocol (NTP) servers."
+    Type: String
+    Default: 169.254.169.123
+  DhcpOptionsNtpServers2:
+    Description: "The IPv4 addresses of a 2nd Network Time Protocol (NTP) servers or blank."
+    Type: String
+    Default: ""
+  #---
   PublicSubnet1Name:
     Description: Name for the Public Subnet 1
     Type: String
@@ -143,6 +160,14 @@ Metadata:
           - DnsHostnames
       -
         Label:
+          default: "VPC DHCP Options Configurations"
+        Parameters:
+          - DhcpOptionsDomainNameServers1
+          - DhcpOptionsDomainNameServers2
+          - DhcpOptionsNtpServers1
+          - DhcpOptionsNtpServers2
+      -
+        Label:
           default: "Subnets Configurations"
         Parameters:
           - PublicSubnet1Name
@@ -212,6 +237,30 @@ Resources:
               - !Sub ${VpcName}
         - Key: Environment
           Value: !Ref EnvironmentName
+  #------------------ DHCP Options
+  DhcpOptions:
+    Type: AWS::EC2::DHCPOptions
+    Properties:
+      DomainNameServers:
+        - !Ref DhcpOptionsDomainNameServers1
+        - !Ref DhcpOptionsDomainNameServers2
+      NtpServers: 
+        - !Ref DhcpOptionsNtpServers1
+        - !Ref DhcpOptionsNtpServers2
+      Tags: 
+        - Key: Name
+          Value:
+            Fn::If:
+              - CheckEnvironment
+              - !Sub ${EnvironmentName}-${VpcName}-DhcpOptions
+              - !Sub ${VpcName}-DhcpOptions
+        - Key: Environment
+          Value: !Ref EnvironmentName
+  AssociationDhcpOptionsToVpc:
+    Type: AWS::EC2::VPCDHCPOptionsAssociation
+    Properties:
+      DhcpOptionsId: !Ref DhcpOptions
+      VpcId: !Ref Vpc
   #------------------ Internet GW
   Igw:
     Type: AWS::EC2::InternetGateway
