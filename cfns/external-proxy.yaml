@@ -89,7 +89,7 @@ Resources:
           http_access deny !localnet
  
           # Only allow access to whitelisted destinations.
-          acl whitelist dstdomain "/etc/squid/whitelist" 
+          acl whitelist url_regex "/etc/squid/whitelist"
           http_access allow whitelist
 
           # And finally deny all other access to this proxy 
