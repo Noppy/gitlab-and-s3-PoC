@@ -28,7 +28,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 9010
       ToPort: 9011
-      CidrIp: 0.0.0.0/0
+      CidrIp: 10.0.0.0/8
   GitlabSGReceivSsh:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -36,7 +36,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 22
       ToPort: 22
-      CidrIp: 0.0.0.0/0
+      CidrIp: 10.0.0.0/8
   #--
   RdsSG:
     Type: AWS::EC2::SecurityGroup
@@ -61,7 +61,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupName: ClientVPC-InstanceSG
-      GroupDescription: SG for Client and bashtion instances
+      GroupDescription: SG for Client instances
       VpcId: 
         Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcId
       Tags:
@@ -74,7 +74,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 22
       ToPort: 22
-      CidrIp: 0.0.0.0/0
+      CidrIp: 10.0.0.0/8
   ClientSGReceivRdp1:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -83,10 +83,30 @@ Resources:
       FromPort: 3389
       ToPort: 3389
       CidrIp: 10.0.0.0/8
-  ClientSGReceivRdp2:
+
+  #--
+  BastionSG:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ExternalVPC-BastionSG
+      GroupDescription: SG for bashtion instances
+      VpcId: 
+        Fn::ImportValue: GitlabS3PoC-ExternalVPC-VpcId
+      Tags:
+        - Key: Name
+          Value: ExternalVPC-BastionSG
+  BastionSGReceivSsh:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: !Ref ClientSG
+      GroupId: !Ref BastionSG
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: 10.0.0.0/8
+  BastionSGReceivRdp2:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref BastionSG
       IpProtocol: tcp
       FromPort: 3389
       ToPort: 3389
@@ -95,13 +115,13 @@ Resources:
   ExternalProxySG:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupName: ClientVPC-ExternalProxySG
+      GroupName: ExternalVPC-ExternalProxySG
       GroupDescription: SG for external proxy instances
       VpcId: 
-        Fn::ImportValue: GitlabS3PoC-ClientVPC-VpcId
+        Fn::ImportValue: GitlabS3PoC-ExternalVPC-VpcId
       Tags:
         - Key: Name
-          Value: ClientVPC-ExternalProxySG
+          Value: ExternalVPC-ExternalProxySG
   ExternalProxySGSsh:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -136,7 +156,7 @@ Resources:
       IpProtocol: tcp
       FromPort: 22
       ToPort: 22
-      CidrIp: 0.0.0.0/0
+      CidrIp: 10.0.0.0/8
   InternalProxySGSProxy:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -162,6 +182,11 @@ Outputs:
     Value: !Ref ClientSG
     Export:
       Name: !Sub "${AWS::StackName}-ClientSGId"
+  BastionSGId:
+    Description:  BastionSG ID
+    Value: !Ref BastionSG
+    Export:
+      Name: !Sub "${AWS::StackName}-BastionSGId"
   ExternalProxySGId:
     Description:  ExternalProxySG ID
     Value: !Ref ExternalProxySG

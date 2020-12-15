@@ -70,92 +70,12 @@ gitコマンド用のクライアントVPC(ClientVPC)、gitlab用VPC(GitlabVPC)�
 なお、CloudFormationの進捗状況は、別途マネージメントコンソールの画面をだしCloudFormationのスタックを表示するとわかりやすいです。
 <img src="./Documents/" whdth=500>
 
-### (2)-(a) ClientVPC作成
-```shell
-#ClientVPC
-CFN_STACK_PARAMETERS='
-[
-  {
-    "ParameterKey": "DnsHostnames",
-    "ParameterValue": "true"
-  },
-  {
-    "ParameterKey": "DnsSupport",
-    "ParameterValue": "true"
-  },
-  {
-    "ParameterKey": "InternetAccess",
-    "ParameterValue": "true"
-  },
-  {
-    "ParameterKey": "EnableNatGW",
-    "ParameterValue": "false"
-  },
-  {
-    "ParameterKey": "VpcInternalDnsNameEnable",
-    "ParameterValue": "false"
-  },
-  {
-    "ParameterKey": "VpcName",
-    "ParameterValue": "ClientVPC"
-  },
-  {
-    "ParameterKey": "VpcCidr",
-    "ParameterValue": "10.1.0.0/16"
-  },
-  {
-    "ParameterKey": "PublicSubnet1Name",
-    "ParameterValue": "PubSub1"
-  },
-  {
-    "ParameterKey": "PublicSubnet1Cidr",
-    "ParameterValue": "10.1.0.0/19"
-  },
-  {
-    "ParameterKey": "PublicSubnet2Name",
-    "ParameterValue": "PubSub2"
-  },
-  {
-    "ParameterKey": "PublicSubnet2Cidr",
-    "ParameterValue": "10.1.32.0/19"
-  },
-  {
-    "ParameterKey": "PrivateSubnet1Name",
-    "ParameterValue": "PrivateSub1"
-  },
-  {
-    "ParameterKey": "PrivateSubnet1Cidr",
-    "ParameterValue": "10.1.128.0/19"
-  },
-  {
-    "ParameterKey": "PrivateSubnet2Name",
-    "ParameterValue": "PrivateSub2"
-  },
-  {
-    "ParameterKey": "PrivateSubnet2Cidr",
-    "ParameterValue": "10.1.160.0/19"
-  }
-]'
-aws --profile ${PROFILE} cloudformation create-stack \
-    --stack-name GitlabS3PoC-ClientVPC \
-    --template-body "file://./cfns/vpc-4subnets.yaml" \
-    --parameters "${CFN_STACK_PARAMETERS}" \
-    --capabilities CAPABILITY_IAM ;
-```
-### (2)-(b) GitlabVPC作成
+### (2)-(a) GitlabVPC作成
 ```shell
 # GitlabVPC
 CFN_STACK_PARAMETERS='
 [
   {
-    "ParameterKey": "DnsHostnames",
-    "ParameterValue": "true"
-  },
-  {
-    "ParameterKey": "DnsSupport",
-    "ParameterValue": "true"
-  },
-  {
     "ParameterKey": "InternetAccess",
     "ParameterValue": "false"
   },
@@ -165,7 +85,11 @@ CFN_STACK_PARAMETERS='
   },
   {
     "ParameterKey": "VpcInternalDnsNameEnable",
-    "ParameterValue": "false"
+    "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "VpcInternalDnsName",
+    "ParameterValue": "local."
   },
   {
     "ParameterKey": "VpcName",
@@ -215,14 +139,169 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --parameters "${CFN_STACK_PARAMETERS}" \
     --capabilities CAPABILITY_IAM ;
 ```
-### (2)-(c) TransitGateway接続(CloudFormation利用)
+### (2)-(b) GitlabVPCのResolver OutboundEndpoint作成
+```shell
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-GitlabVPCResolverEndpoint  \
+    --template-body "file://./cfns/Route53ResolverEndpoint.yaml";
+```
+
+### (2)-(c) ClientVPC作成
+```shell
+# GitlabVPCのOutbound Endpointの情報取得
+InboundEndpointId=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-GitlabVPCResolverEndpoint \
+        --query 'Stacks[].Outputs[?OutputKey==`ResolverInboundEndpointEndpointId`].[OutputValue]')
+
+declare -a DnsIps=($(aws --profile ${PROFILE} --output text \
+    route53resolver list-resolver-endpoint-ip-addresses \
+      --resolver-endpoint-id ${InboundEndpointId} \
+    --query 'IpAddresses[].Ip' ))
+echo -e "InboundEndpointId = ${InboundEndpointId}\nDNS IP(1st) = ${DnsIps[0]}\nDNS IP(2nd) = ${DnsIps[1]}"
+
+#ClientVPC
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "InternetAccess",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "EnableNatGW",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "VpcInternalDnsNameEnable",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "VpcName",
+    "ParameterValue": "ClientVPC"
+  },
+  {
+    "ParameterKey": "DhcpOptionsDomainNameServers1",
+    "ParameterValue": "'"${DnsIps[0]}"'"
+  },
+  {
+    "ParameterKey": "DhcpOptionsDomainNameServers2",
+    "ParameterValue": "'"${DnsIps[1]}"'"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.1.0.0/16"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Name",
+    "ParameterValue": "TgwSub1"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Cidr",
+    "ParameterValue": "10.1.0.0/19"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Name",
+    "ParameterValue": "TgwSub1"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Cidr",
+    "ParameterValue": "10.1.32.0/19"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Name",
+    "ParameterValue": "ClientSub1"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Cidr",
+    "ParameterValue": "10.1.128.0/19"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Name",
+    "ParameterValue": "ClientSub1"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Cidr",
+    "ParameterValue": "10.1.160.0/19"
+  }
+]'
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-ClientVPC \
+    --template-body "file://./cfns/vpc-4subnets.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}" \
+    --capabilities CAPABILITY_IAM ;
+```
+
+### (2)-(d) ExternalVPC作成
+```shell
+# GitlabVPC
+CFN_STACK_PARAMETERS='
+[
+  {
+    "ParameterKey": "InternetAccess",
+    "ParameterValue": "true"
+  },
+  {
+    "ParameterKey": "EnableNatGW",
+    "ParameterValue": "false"
+  },
+  {
+    "ParameterKey": "VpcName",
+    "ParameterValue": "ExternalVPC"
+  },
+  {
+    "ParameterKey": "VpcCidr",
+    "ParameterValue": "10.3.0.0/16"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Name",
+    "ParameterValue": "PublicSub1"
+  },
+  {
+    "ParameterKey": "PublicSubnet1Cidr",
+    "ParameterValue": "10.3.0.0/19"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Name",
+    "ParameterValue": "PublicSub2"
+  },
+  {
+    "ParameterKey": "PublicSubnet2Cidr",
+    "ParameterValue": "10.3.32.0/19"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Name",
+    "ParameterValue": "TgwSub1"
+  },
+  {
+    "ParameterKey": "PrivateSubnet1Cidr",
+    "ParameterValue": "10.3.128.0/19"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Name",
+    "ParameterValue": "TgwSub2"
+  },
+  {
+    "ParameterKey": "PrivateSubnet2Cidr",
+    "ParameterValue": "10.3.160.0/19"
+  }
+]'
+
+aws --profile ${PROFILE} cloudformation create-stack \
+    --stack-name GitlabS3PoC-ExternalVPC  \
+    --template-body "file://./cfns/vpc-4subnets.yaml" \
+    --parameters "${CFN_STACK_PARAMETERS}" \
+    --capabilities CAPABILITY_IAM ;
+```
+### (2)-(e) TransitGateway接続(CloudFormation利用)
 ![TransitGateway](./Documents/)
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-TGW \
     --template-body "file://./cfns/tgw.yaml" ;
 ```
-### (2)-(d) ClientVPC VPCE作成
+
+
+### (2)-(f) VPCE作成(ClientVPC)
 ClientVPCにて、Private Subnet上からAmazon Linux2のyumアップデートが可能となるよう、Amazon Linux2のyumリポジトリ用バケットへのアクセスのみ許可したS3のVPECエンドポイントを作成します。
 ```shell
 # Internal-VPCへのVPCE作成
@@ -234,7 +313,7 @@ aws --profile ${PROFILE} cloudformation create-stack \
 ## (3) Security Group作成(CloudFormation利用)
 EC2インスタンスに適用するSecurityGroupを作成します。
 ```shell
-RDP_CIDR="27.0.0.0/8"
+RDP_CIDR="27.0.0.0/8" #RDPのクライアントに合わせて変更
 
 CFN_STACK_PARAMETERS='
 [
