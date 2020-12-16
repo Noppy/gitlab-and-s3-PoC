@@ -2,10 +2,6 @@
 # 作成する構成
 <img src="./Documents/01_OverallStructure.png" whdth=500>
 
-## 注意事項
-- 事前にGitlab EEのFree Trialのコードを事前に取得する必要があります。取得は https://about.gitlab.com/free-trial/ にアクセスし、<b>GitLab Self-Managed</b>の<b>Start free trial</b>で情報を登録して取得します。取得したコードは、gitlabのセットアップで利用します。
-
-
 # 作成手順
 ## (1)事前設定
 ### (1)-(a) 作業環境の準備
@@ -333,7 +329,7 @@ GitLabVPCにVPCEは、Gitlab用のS3バケットとAmazon Linux2のyumリポジ�
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-S3 \
-    --template-body "file://./cfns/s3.yaml" ;
+    --template-body "file://./Documnets/s3.yaml" ;
 ```
 ## (5) IAMロール作成
 ```shell
