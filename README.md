@@ -552,7 +552,7 @@ aws configure set output json
 #動作確認
 aws sts get-caller-identity
 ```
-各Linuxインスタンスへのアクセス確認を行います。
+各Linuxインスタンスへのアクセスのための情報を設定します。
 ```shell
 #利用するプロファイル設定
 export PROFILE=default
@@ -575,7 +575,9 @@ InternalProxyIP=$(aws --profile ${PROFILE} --output text \
         --stack-name GitlabS3PoC-InternalProxy \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
 echo -e "ClientIP      = ${ClientIP}\nGitlabIP      = ${GitlabIP}\nExternalProxy = ${ExternalProxyIP}\nInternalProxy = ${InternalProxyIP}"
-
+```
+各Linuxインスタンスに接続確認します。
+```shell
 #Clientにログイン
 ssh -A ec2-user@${ClientIP}
 exit
@@ -863,22 +865,59 @@ http://gitlab.local:9010
 - Windows ClientのChromeから<code>testusera</code>でGitLabにログインする
 - 「New Project」で空のプロジェクト・リポジトリを作成する(ex, "docker_test")
 ### (9)-(b)docker pushのテスト
-- Linux Clientにログインする
+Bastion(Linux)経由でClient(Linux)にログインします
+- Bastionへのログイン
+```shell
+#別ターミナルを起動し下記を実行
+
+#初期化
+export PROFILE=default #デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
+export REGION=$(aws --profile ${PROFILE} configure get region)
+echo "${PROFILE}  ${REGION}"
+
+#BastionのPublic IP取得
+BastionIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Bastion \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePublicIp`].[OutputValue]')
+echo "BastionIP = ${BastionIP}"
+
+#Bastionにログイン
+ssh-add
+ssh -A ec2-user@${BastionIP}
+```
+- BastionからClient(Linux)へのログイン
+```shell
+#利用するプロファイル設定
+export PROFILE=default
+
+#ClientのPrivate IP取得
+ClientIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Client \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "ClientIP  = ${ClientIP}\n"
+
+ssh ${ClientIP}
+```
 - DockerにProxy設定をする
 ```shell
-. ~/.proxy_setting;
+# External Proxy利用設定
+. ~/externalproxy_setting;
+
 # GitlabインスタンスのPrivateIP取得
 PROFILE=default
-GitlabIP=$(aws --profile ${PROFILE} --output text \
+InternalProxyIp=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-Gitlab \
+        --stack-name GitlabS3PoC-InternalProxy \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+
 #dockerのProxy設定
 CONFIG='
 [Service]
-Environment="HTTP_PROXY='"${HTTP_PROXY}"'"
-Environment="HTTPS_PROXY='"${HTTP_PROXY}"'"
-Environment="NO_PROXY=localhost,127.0.0.1,gitlab,'"${GitlabIP}"'"
+Environment="HTTP_PROXY=http://'"${InternalProxyIp}"':3128"
+Environment="HTTPS_PROXY=http://'"${InternalProxyIp}"':3128"
+Environment="NO_PROXY=localhost,127.0.0.1,169.254.169.254,169.254.169.123"
 '
 sudo mkdir -p /etc/systemd/system/docker.service.d
 echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
@@ -887,8 +926,15 @@ echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
 cat /etc/systemd/system/docker.service.d/http-proxy.conf
 
 #dockerにhttpアクセスの例外設定を追加
+PROFILE=default
+GitlabDNS=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstanceDns`].[OutputValue]')
 CONFIG='{
- "insecure-registries": ["'"${GitlabIP}"':9011"]
+  "insecure-registries": [
+    "'"${GitlabDNS%.}"':9011"
+  ]
 }'
 echo "${CONFIG}" | sudo tee /etc/docker/daemon.json
 cat /etc/docker/daemon.json
@@ -896,25 +942,22 @@ cat /etc/docker/daemon.json
 #デーモン再起動
 sudo systemctl daemon-reload
 sudo systemctl restart docker
-
-#/etc/hostsにgitlabを追加
-echo "${GitlabIP} gitlab" | sudo tee -a /etc/hosts
 ```
 - ダミーのイメージを GitLab内蔵Docker RegisitoryにPushする
 ```shell
 # GitlabインスタンスのPrivateIP取得
 PROFILE=default
-GitlabIP=$(aws --profile ${PROFILE} --output text \
+GitlabDNS=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-Gitlab \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo "GitlabIP = ${GitlabIP}"
+        --query 'Stacks[].Outputs[?OutputKey==`InstanceDns`].[OutputValue]')
+echo "GitlabIP = ${GitlabDNS}"
 
 #docker alpineをDocker HubからPullする
 docker pull alpine
 docker image ls
 
-docker tag alpine:latest ${GitlabIP}:9011/testusera/docker_test
-docker login ${GitlabIP}:9011 -u testusera
-docker push ${GitlabIP}:9011/testusera/docker_test
+docker tag alpine:latest ${GitlabDNS%.}:9011/testusera/docker_test
+docker login ${GitlabDNS%.}:9011 -u testusera
+docker push ${GitlabDNS%.}:9011/testusera/docker_test
 ```
