@@ -493,6 +493,11 @@ aws --profile ${PROFILE} cloudformation create-stack \
 ```
 ### (6)-(h) GitlabVPC Internal-Proxyインスタンス作成
 ```shell
+# Gitlabインスタンス作成完了までのWait
+aws --profile ${PROFILE} cloudformation wait \
+    stack-create-complete \
+      --stack-name GitlabS3PoC-Gitlab
+
 # Set Stack Parameters
 CFN_STACK_PARAMETERS='
 [
@@ -516,8 +521,7 @@ aws --profile ${PROFILE} cloudformation create-stack \
 
 
 ## (7) OSセットアップ
-
-### (6)-(f) ログイン確認
+### (7)-(a) Linuxインスタンスログイン確認
 別ターミナルを起動し下記を実行して作成したインスタンスにログイン可能かを確認します。
 ```shell
 #別ターミナルを起動し下記を実行
@@ -548,7 +552,7 @@ aws configure set output json
 #動作確認
 aws sts get-caller-identity
 ```
-git Clientへのアクセス確認を行います。
+各Linuxインスタンスへのアクセス確認を行います。
 ```shell
 #利用するプロファイル設定
 export PROFILE=default
@@ -558,33 +562,72 @@ ClientIP=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-Client \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-ExternalProxyIP=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-ExternalProxy \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
 GitlabIP=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-Gitlab \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo -e "ClientIP      = ${ClientIP}\nEXternalProxy = ${ExternalProxyIP}\nGitlabIP      = ${GitlabIP}"
+ExternalProxyIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-ExternalProxy \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+InternalProxyIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-InternalProxy \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo -e "ClientIP      = ${ClientIP}\nGitlabIP      = ${GitlabIP}\nExternalProxy = ${ExternalProxyIP}\nInternalProxy = ${InternalProxyIP}"
+
 #Clientにログイン
 ssh -A ec2-user@${ClientIP}
+exit
+
+#Gitlabにログイン
+ssh -A ec2-user@${GitlabIP}
+exit
 
 #External-Proxyにログイン
 ssh -A ec2-user@${ExternalProxyIP}
+exit
+
+#Internal-Proxyにログイン
+ssh -A ec2-user@${InternalProxyIP}
+exit
 ```
-### (6)-(g) クライアントセットアップ
-Clientにログインし、awscli初期設定、git/dockerをインストールする
+Bastionサーバ上で、External Proxy用の設定ファイルを作成し、各インスタンスに配布します。
 ```shell
 #Proxy設定
-PROXY_IP=<CloudFormationの出力からInstancePrivateIpを確認>
-
-cat >> .proxy_setting << EOL
-export HTTP_PROXY=http://${PROXY_IP}:3128
-export HTTPS_PROXY=http://${PROXY_IP}:3128
+cat >> externalproxy_setting << EOL
+export HTTP_PROXY=http://${ExternalProxyIP}:3128
+export HTTPS_PROXY=http://${ExternalProxyIP}:3128
 export NO_PROXY=169.254.169.254
 EOL
-. .proxy_setting
+
+#設定ファイルの確認
+cat externalproxy_setting
+
+#各Linuxインスタンスへの配布
+scp externalproxy_setting ec2-user@${ClientIP}:/home/ec2-user/
+scp externalproxy_setting ec2-user@${GitlabIP}:/home/ec2-user/
+```
+
+### (7)-(b) クライアント(Linux)セットアップ
+Client(Linux)にログインする。
+```shell
+#Bastionサーバ上から下記でClient(Linux)にログイン
+ClientIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Client \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+
+#Clientにログイン
+ssh -A ec2-user@${ClientIP}
+```
+クライアントログイン後に、git/dockerをインストールする
+```shell
+#ExternalProxy設定の一時的な取り込み
+ls externalproxy_setting  #ファイルがあることを確認
+
+#設定の取り込み
+. externalproxy_setting
 
 #AWS CLI初期化
 Region=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed -e 's/.$//')
@@ -606,34 +649,22 @@ sudo service docker start
 sudo usermod -a -G docker ec2-user
 sudo systemctl enable docker
 sudo service docker restart
+
+#Dockerデーモンの状態確認(active (running) 状態であればOK!!)
+systemctl status docker
+
+#一旦Clientを終了する
+exit
 ```
-
-## (7) Windowsクライアントインスタンスの作成
-元のCloudFormationの作業を行っていたターミナルに戻り、Windowsの踏み台をClientを作成する
-### (7)-(a) 情報設定
-```shell
-KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
-WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
-    ec2 describe-images \
-        --owners amazon \
-        --filters 'Name=name,Values=Windows_Server-2019-Japanese-Full-Base-????.??.??' \
-                  'Name=state,Values=available' \
-        --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
-echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${WIN2019_AMIID}"
-```
-
-
-
-
-
-
-### (7)-(d)セットアップ
+### (7)-(c)Windowsセットアップ
+- マネコンまたは、先ほどのBastion(Linux)で、External-ProxyのPrivateIPを控える
 - BastionにRDPでログインする。
 - ClientにRDPログインする。
 - ClientにRDPをセットアップする
+- Chromeをインストールする
   - PowerShellを起動する
   ```powershell
-  $proxy = "http://10.1.59.155:3128"
+  $proxy = "http://<External-ProxyのPrivateIP>:3128"
   $url = "https://dl.google.com/tag/s/appguid%3D%7B8A69D345-D564-463C-AFF1-A69D9E530F96%7D%26iid%3D%7BF562C505-772C-7993-3E76-C49E22834DC7%7D%26lang%3Den%26browser%3D4%26usagestats%3D0%26appname%3DGoogle%2520Chrome%26needsadmin%3Dtrue%26ap%3Dx64-stable-statsdef_0%26brand%3DGCEB/dl/chrome/install/GoogleChromeEnterpriseBundle64.zip"
   $output = "GoogleChromeEnterpriseBundle64.zip"
   
@@ -666,18 +697,7 @@ echo "BastionIP = ${BastionIP}"
 ssh-add
 ssh -A ec2-user@${BastionIP}
 ```
-Bastionにログインしたら、そこからGitlabにログインする
-```shell
-PROFILE=default
-ClientIP=$(aws --profile ${PROFILE} --output text \
-    cloudformation describe-stacks \
-        --stack-name GitlabS3PoC-Client \
-        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo -e "ClientIP      = ${ClientIP}"
-#Clientにログイン
-ssh -A ec2-user@${ClientIP}
-```
-Clientから、Gitlabにログインする
+Gitlabにログインする
 ```shell
 PROFILE=default
 GitlabIP=$(aws --profile ${PROFILE} --output text \
@@ -686,15 +706,13 @@ GitlabIP=$(aws --profile ${PROFILE} --output text \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
 echo -e "GitlabIP      = ${GitlabIP}"
 
-#Clientで作成したPROXY設定を、Gitlabインスタンスにコピーする
-scp .proxy_setting ec2-user@${GitlabIP}:/home/ec2-user
-
 #Gitlabにログイン
 ssh -A ec2-user@${GitlabIP}
-
-
+```
+Gitlab環境の初期化を行う
+```shell
 #AWS CLI初期化
-( . ~/.proxy_setting
+( . ~/externalproxy_setting
 Region=$(curl -s http://169.254.169.254/latest/meta-data/placement/availability-zone | sed -e 's/.$//')
 aws configure set region ${Region}
 aws configure set output json
@@ -715,11 +733,15 @@ sudo usermod -a -G docker ec2-user
 sudo systemctl enable docker
 sudo service docker restart
 
+#Dockerデーモンの状態確認(active (running) 状態であればOK!!)
+systemctl status docker
+
+#ec2-userへのグループ追加を反映するためexitして再ログインする
 exit
 ```
 dockerグループへの所属を反映させるため再度、Clientからgitlabにログインする。
 ```shell
- ssh -A ec2-user@${GitlabIP}
+ssh -A ec2-user@${GitlabIP}
 ```
 Gitlabインスタンスへログイン後
 ```shell
@@ -728,12 +750,12 @@ docker ps
 ```
 DockerのProxy設定
 ```shell
-(. .proxy_setting;
+(. externalproxy_setting;
 CONFIG='
 [Service]
 Environment="HTTP_PROXY='"${HTTP_PROXY}"'"
 Environment="HTTPS_PROXY='"${HTTP_PROXY}"'"
-Environment="NO_PROXY=localhost,127.0.0.1,gitlab"
+Environment="NO_PROXY=localhost,127.0.0.1,gitlab.local"
 '
 sudo mkdir -p /etc/systemd/system/docker.service.d
 echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
@@ -774,7 +796,7 @@ docker ps
 GitLabコンテナ起動
 ```shell
 bash
-. ~/.proxy_setting;
+. ~/externalproxy_setting;
 
 #情報取得
 PROFILE=default
@@ -783,12 +805,17 @@ Bucket=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-S3 \
         --query 'Stacks[].Outputs[?OutputKey==`S3BucketName`].[OutputValue]')
-echo -e "Bucket = ${Bucket}"
+GitlabDNS=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Gitlab \
+        --query 'Stacks[].Outputs[?OutputKey==`InstanceDns`].[OutputValue]')
+
+echo -e "Bucket = ${Bucket}\nGitlabDNS=${GitlabDNS}"
 
 #OMNIBUS_CONFIGURATIONの作成
 OMNIBUS_CONF="
-external_url 'http://gitlab:9010';
-registry_external_url 'http://gitlab:9011';
+external_url 'http://${GitlabDNS%\.}:9010';
+registry_external_url 'http://${GitlabDNS%\.}:9011';
 registry['storage'] = {
   's3' => {
     'bucket' => '${Bucket}',
@@ -821,7 +848,7 @@ docker run \
 ### (8)-(d)GitLabアクセステスト
 Windows ClientのChromeから、下記URLにアクセスし、GitLabのrootユーザパスワード変更画面が表示されることを確認する。
 ```shell
-http://<gitlabインスタンスのIP>:9010
+http://gitlab.local:9010
 ```
 - chromでGitLabのパスワード変更画面が表示されたら、下記オペレーションでパスワードの変更を行う。
   - rootユーザのパスワードを設定する
