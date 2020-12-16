@@ -55,7 +55,6 @@ Resources:
           Fn::Join:
             - ""
             - - !Sub |
-                !Sub |
                 #!/bin/bash -xe
                 # Update ALL rpms, and change hostname to Userfrendly name 
                 yum -y update
@@ -96,38 +95,45 @@ Resources:
                 http_access deny !localnet
 
                 # And finally allow all other access to this proxy 
-                http_access Allow all
+                http_access allow all
 
                 # Set Multi-Stage proxys
               - "cache_peer "
               - Fn::ImportValue: GitlabS3PoC-ExternalProxy-InstancePrivateIp
               - " parent 3128 0 proxy-only\n"
-              - "acl lab_internal dstdomain /etc/squid/direct_access_list\n"
+              - "\n"
+              - "acl internal dstdomain \"/etc/squid/direct_access_list\"\n"
               - "cache_peer_access "
               - Fn::ImportValue: GitlabS3PoC-ExternalProxy-InstancePrivateIp
-              - " allow !lab_internal\n"
+              - " allow !internal\n"
               - !Sub |
-                always_direct allow lab_internal
-                never_direct allow !lab_internal
+                
+                always_direct allow internal
+                never_direct  allow !internal
           
                 #------------------------------------------ 
                 http_port 3128
 
                 # Leave coredumps in the first cache dir
                 coredump_dir /var/spool/squid
- 
-                # anonymouse host name
-                visible_hostname unknown
                 EOL
 
                 #/etc/squid/direct_access_list
-                cat > /etc/squid/direct_access_list << EOL
+              - "GITLABURL=\""
               - Fn::ImportValue: GitlabS3PoC-Gitlab-InstanceDns
-              - "\n"
+              - "\"\n"
+              - "cat > /etc/squid/direct_access_list << EOL\n"
+              - "${GITLABURL%.}\n"
               - Fn::ImportValue: GitlabS3PoC-Gitlab-InstancePrivateIp
               - "\n"
               - Fn::ImportValue: GitlabS3PoC-S3-S3BucketRegionalDomainName
               - "\n"
+              - !Sub |
+                EOL
+                # setup auto start
+                systemctl start squid
+                systemctl enable squid
+
   InstanceRecovery:
     Type: AWS::CloudWatch::Alarm
     Condition: CheckAutoRecovery
