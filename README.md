@@ -1,7 +1,6 @@
 # Glitlab + S3検証
-# 検証概要
-
-https://docs.gitlab.com/ee/install/aws/
+# 作成する構成
+<img src="./Documents/01_OverallStructure.png" whdth=500>
 
 ## 注意事項
 - 事前にGitlab EEのFree Trialのコードを事前に取得する必要があります。取得は https://about.gitlab.com/free-trial/ にアクセスし、<b>GitLab Self-Managed</b>の<b>Start free trial</b>で情報を登録して取得します。取得したコードは、gitlabのセットアップで利用します。
@@ -68,7 +67,7 @@ echo "${PROFILE}  ${REGION}"
 ## (2)ネットワーク環境の作成(CloudFormation利用)
 gitコマンド用のクライアントVPC(ClientVPC)、gitlab用VPC(GitlabVPC)を作成しTransit Gatewayで接続します。(VPC接続は、VPC Peeringでも可能)
 なお、CloudFormationの進捗状況は、別途マネージメントコンソールの画面をだしCloudFormationのスタックを表示するとわかりやすいです。
-<img src="./Documents/" whdth=500>
+<img src="./Documents/03_NetworkStructure.png" whdth=500>
 
 ### (2)-(a) GitlabVPC作成
 ```shell
@@ -293,7 +292,6 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --capabilities CAPABILITY_IAM ;
 ```
 ### (2)-(e) TransitGateway接続(CloudFormation利用)
-![TransitGateway](./Documents/)
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-TGW \
@@ -331,6 +329,7 @@ aws --profile ${PROFILE} cloudformation create-stack \
 Gitlab用のS3バケットとGitLabVPCにVPCEを作成します。
 Gitlab用のS3バケットは、GitLabVPCのVPCEからのアクセスのみ許可します。
 GitLabVPCにVPCEは、Gitlab用のS3バケットとAmazon Linux2のyumリポジトリアクセスのみ許可します。
+![S3バケット&VPCE](./Documents/04_S3Bucket.png)
 ```shell
 aws --profile ${PROFILE} cloudformation create-stack \
     --stack-name GitlabS3PoC-S3 \
@@ -349,7 +348,8 @@ aws --profile ${PROFILE} cloudformation create-stack \
     --template-body "file://./cfns/iam.yaml" \
     --capabilities CAPABILITY_IAM ;
 ```
-## (6) インスタンスセットアップ(Bastion/Proxy/Client)
+## (6) インスタンスセットアップ(Bastion/Proxy/Client/Gitlab)
+![S3バケット&VPCE](./Documents/05_instances.png)
 ### (6)-(a) 情報設定
 ```shell
 KEYNAME="CHANGE_KEY_PAIR_NAME"  #環境に合わせてキーペア名を設定してください。 
@@ -961,3 +961,6 @@ docker tag alpine:latest ${GitlabDNS%.}:9011/testusera/docker_test
 docker login ${GitlabDNS%.}:9011 -u testusera
 docker push ${GitlabDNS%.}:9011/testusera/docker_test
 ```
+
+# 参考
+- https://docs.gitlab.com/ee/install/aws/
