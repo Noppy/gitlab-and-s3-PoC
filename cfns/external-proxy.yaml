@@ -100,9 +100,6 @@ Resources:
 
           # Leave coredumps in the first cache dir
           coredump_dir /var/spool/squid
- 
-          # anonymouse host name
-          visible_hostname unknown
           EOL
 
           #/etc/squid/whitelist
