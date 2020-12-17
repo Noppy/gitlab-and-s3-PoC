@@ -2,7 +2,10 @@
 # 作成する構成
 <img src="./Documents/01_OverallStructure.png" whdth=500>
 
-# 作成手順
+作成後の実際の設定ファイル例についてこちらを参照
+- [作成した検証環境の各種設定ファイル例](.snippet.md)
+
+# Step.1 SSL_Bumpなしの多段Proxy構成作成手順
 ## (1)事前設定
 ### (1)-(a) 作業環境の準備
 下記を準備します。もしCLI実行環境がない場合は、次の(1)-(b)を参照し、Cloud9の環境を準備して実行します。
@@ -362,7 +365,7 @@ WIN2019_AMIID=$(aws --profile ${PROFILE} --output text \
         --filters 'Name=name,Values=Windows_Server-2019-Japanese-Full-Base-????.??.??' \
                   'Name=state,Values=available' \
         --query 'reverse(sort_by(Images, &CreationDate))[:1].ImageId' ) ;
-echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${AL2_AMIID}\nAL2_AMIID = ${WIN2019_AMIID}"
+echo -e "KEYNAME   = ${KEYNAME}\nAL2_AMIID = ${AL2_AMIID}\nWIN2019_AMIID = ${WIN2019_AMIID}"
 ```
 ### (6)-(b) ExternalVPC Bastion(Linux)インスタンス作成
 ```shell
@@ -570,7 +573,7 @@ InternalProxyIP=$(aws --profile ${PROFILE} --output text \
     cloudformation describe-stacks \
         --stack-name GitlabS3PoC-InternalProxy \
         --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
-echo -e "ClientIP      = ${ClientIP}\nGitlabIP      = ${GitlabIP}\nExternalProxy = ${ExternalProxyIP}\nInternalProxy = ${InternalProxyIP}"
+echo -e "ClientIP      = ${ClientIP}\nGitlabIP      = ${GitlabIP}\nExternalProxyIP = ${ExternalProxyIP}\nInternalProxyIP = ${InternalProxyIP}"
 ```
 各Linuxインスタンスに接続確認します。
 ```shell
@@ -957,6 +960,276 @@ docker tag alpine:latest ${GitlabDNS%.}:9011/testusera/docker_test
 docker login ${GitlabDNS%.}:9011 -u testusera
 docker push ${GitlabDNS%.}:9011/testusera/docker_test
 ```
+# Step.２ SSL_Bump設定追加
+## (10)External-ProxyでのSSL_bump設定
+### (10)-(a) External-Proxyにログイン
+- Bastionにログイン
+```shell
+#別ターミナルを起動し下記を実行
+
+#初期化
+export PROFILE=default #デフォルト以外のプロファイルの場合は、利用したいプロファイル名を指定
+echo "${PROFILE}"
+
+#BastionのPublic IP取得
+BastionIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-Bastion \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePublicIp`].[OutputValue]')
+echo "BastionIP = ${BastionIP}"
+
+#Bastionにログイン
+ssh-add
+ssh -A ec2-user@${BastionIP}
+```
+- External-Proxyにログイン
+Bastion(Linux)からExternal-Proxyにログインします。
+```shell
+#利用するプロファイル設定
+export PROFILE=default
+
+#ClientのPrivate IP取得
+ExternalProxyIP=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-ExternalProxy \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+
+echo -e "ExternalProxyIP = ${ExternalProxyIP}\n"
+
+ssh -A ec2-user@${ExternalProxyIP}
+```
+### (10)-(b) 自己証明書の作成
+- ディレクトリパスなど設定項目の入力
+```shell
+CERT_DIR_PATH="/etc/squid/ssl_cert"
+EXTERNAL_PROXY_NAME="external-proxy"
+SQUID_SSL_CACHE_DIR_PAHT="/var/lib/squid"
+
+SQUID_CONF="/etc/squid/squid.conf"
+TMP_CONF="/tmp/squid.conf.tmp"
+
+#External-ProxyのローカルIPの取得
+TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 21600")
+PROXY_IP=$(curl -H "X-aws-ec2-metadata-token: ${TOKEN}" \
+        http://169.254.169.254/latest/meta-data/local-ipv4)
+echo -e "PROXY_IP = ${PROXY_IP}"
+```
+
+- 証明書用ディレクトリの作成
+```shell
+sudo mkdir -p "${CERT_DIR_PATH}"
+sudo chown squid:squid "${CERT_DIR_PATH}"
+sudo chmod 755 "${CERT_DIR_PATH}"
+```
+- 自己証明書の作成と配置
+```shell
+openssl req -new -newkey rsa:2048 -sha256 \
+  -days 36500 -nodes -x509 -extensions v3_ca \
+  -out ${EXTERNAL_PROXY_NAME}.crt \
+  -keyout ${EXTERNAL_PROXY_NAME}.key \
+  -subj "/L=null/O=null/OU=null/CN=${PROXY_IP}/"
+
+#作成した自己証明書の移動
+sudo mv ${EXTERNAL_PROXY_NAME}.{crt,key} "${CERT_DIR_PATH}"
+sudo chown squid:squid ${CERT_DIR_PATH}/${EXTERNAL_PROXY_NAME}.{crt,key}
+sudo chmod 640 ${CERT_DIR_PATH}/${EXTERNAL_PROXY_NAME}.key
+sudo chmod 644 ${CERT_DIR_PATH}/${EXTERNAL_PROXY_NAME}.crt
+
+```
+### (10)-(c) SSL用のキャッシュディレクトリ作成と初期化
+```shell
+sudo rm -rf ${SQUID_SSL_CACHE_DIR_PAHT}
+sudo /usr/lib64/squid/ssl_crtd -c -s ${SQUID_SSL_CACHE_DIR_PAHT}
+sudo chown -R squid:squid ${SQUID_SSL_CACHE_DIR_PAHT}
+```
+### (10)-(d) Squid設定に更新(SSL Bumpに関する設定更新)
+```shell
+#編集用に設定ファイルをコピー
+sudo cp ${SQUID_CONF} ${TMP_CONF}
+sudo chown ${USER} ${TMP_CONF}
+
+#SSL_Bump機能の設定追加
+cat >> ${TMP_CONF} << EOL
+
+# for ssl_bump
+sslcrtd_program /usr/lib64/squid/ssl_crtd -s ${SQUID_SSL_CACHE_DIR_PAHT} -M 20MB
+sslproxy_cert_error allow all
+ssl_bump stare all
+EOL
+
+#Listen Port設定変更
+sed -i "s|http_port 3128|http_port 3128 ssl-bump generate-host-certificates=on dynamic_cert_mem_cache_size=4MB cert=${CERT_DIR_PATH}/${EXTERNAL_PROXY_NAME}.crt key=${CERT_DIR_PATH}/${EXTERNAL_PROXY_NAME}.key|" ${TMP_CONF} 
+
+#更新した設定ファイルの確認
+vim -R ${TMP_CONF}
+
+#問題なければ、元の設定ファイルを更新後の設定ファイルに差し替える
+sudo cp ${TMP_CONF} ${SQUID_CONF}
+
+#squidの更新
+sudo systemctl restart squid
+sudo systemctl status squid
+```
+
+## (11)Client(Linux)での動作確認
+クライアント(Linux)にログインする
+
+```shell
+ExternalProxyIP=<External-ProxyのIPを設定>
+InternalProxyIP=<Internal-ProxyのIPを設定>
+
+#External-Proxyの証明書の取得
+scp ${ExternalProxyIP}:/etc/squid/ssl_cert/external-proxy.crt .
+
+#curlによる疎通テスト(External-Proxyへの直接のアクセス)
+curl -x http://${ExternalProxyIP}:3128 --cacert external-proxy.crt https://www.google.co.jp
+
+#curlによる疎通テスト(Internal-Proxy -> External-Proxyの多段Proxyでのアクセス)
+curl -x http://${InternalProxyIP}:3128 --cacert external-proxy.crt https://www.google.co.jp
+```
+
+## (12) External-Proxyでのユーザー認証の追加
+検証では、Basic認証を追加しInternal-Proxy経由でのアクセスを確認します。
+- 認証ユーザ: 
+  - ユーザー名: <code>userb</code>
+  - パスワード: <code>HogeHoge</code>
+- Basic認証用のファイルパス: <code>/etc/squid/.htpasswd</code>
+
+## (12)-(a) External-Proxy Basic認証追加
+- External-Proxyにログインした後に下記手順でBasic認証のセットアップを行います。
+```shell
+HTPASSED_PATH="/etc/squid/.htpasswd"
+HTUSER="userb"
+HTPASSWORD="HogeHoge"
+
+# 認証用ユーザ作成コマンド(htpasswd)のインストール
+sudo yum -y install httpd-tools
+
+# 認証ユーザの作成
+echo "${HTPASSWORD}" | sudo htpasswd -i -c ${HTPASSED_PATH} ${HTUSER}
+sudo chown squid:squid ${HTPASSED_PATH}
+sudo chmod 640 ${HTPASSED_PATH}
+```
+- squid.confへの設定追加
+
+下記コマンドで表示された内容を、vimなどで<code>squid.conf</code>の<code>acl CONNECT method CONNECT</code>の行の下に追加します。(下記設定のhttp_accessが、squid.confの先頭行からみて一番最初に来る場所に挿入することがポイント)
+```shell
+CONFIG="
+# Basic認証用の設定
+# Deny unauthenticated users
+auth_param basic program /usr/lib64/squid/basic_ncsa_auth ${HTPASSED_PATH}
+auth_param basic children 5
+auth_param basic realm Squid Basic Authentication
+auth_param basic credentialsttl 2 hours
+auth_param basic casesensitive off
+acl pauth proxy_auth REQUIRED
+http_access deny !pauth
+"
+echo "${CONFIG}"
+```
+上記内容をvimなどで設定
+```shell
+sudo vim /etc/squid/squid.conf
+```
+
+- 上記で表示された内容の反映
+```shell
+#Squidの再起動
+sudo systemctl stop squid
+sudo systemctl start squid
+sudo systemctl status squid
+```
+
+## (12)-(b) Internal-Proxy 認証のパスを行う設定の追加
+
+## (13)Client(Linux)でのユーザ認証の動作確認
+クライアント(Linux)にログインする
+
+```shell
+ExternalProxyIP=<External-ProxyのIPを設定>
+InternalProxyIP=<Internal-ProxyのIPを設定>
+HTUSER="userb"
+HTPASSWORD="HogeHoge"
+
+#curlによる疎通テスト(External-Proxyへの直接のアクセス)
+curl -x http://${HTUSER}:${HTPASSWORD}@${ExternalProxyIP}:3128 --cacert external-proxy.crt https://www.google.co.jp
+
+#curlによる疎通テスト(Internal-Proxy -> External-Proxyの多段Proxyでのアクセス)
+curl -x http://${HTUSER}:${HTPASSWORD}@${InternalProxyIP}:3128 --cacert external-proxy.crt https://www.google.co.jp
+```
+## (14)docker/pipテスト
+### (14)-(a) dockerの設定
+- Clinet(linux)にログイン
+- External-proxyの証明書をOSの共有システム証明書ストレージに登録
+```shell
+#Proxyの自己証明書をLinux OSの共有システム証明書ストレージに登録
+sudo cp external-proxy.crt /etc/pki/ca-trust/source/anchors
+sudo update-ca-trust extract
+```
+- External Proxy設定情報の修正
+この後のAWS CLI実行のためにExternal Proxy設定情報にユーザ認証情報を追加します。
+```shell
+vim ~/externalproxy_setting;
+```
+具体的には以下の用に変更します
+```
+export HTTP_PROXY=http://userb:HogeHoge@<External-ProxyのIP>:3128
+export HTTPS_PROXY=http://userb:HogeHoge@<External-ProxyのIP>:3128
+export NO_PROXY=169.254.169.254
+```
+- GitlabインスタンスのPrivateIP取得
+```shell
+# External-Proxy接続用環境変数の取り込み
+. ~/externalproxy_setting
+
+#設定情報の取得
+HTUSER="userb"
+HTPASSWORD="HogeHoge"
+PROFILE=default
+InternalProxyIp=$(aws --profile ${PROFILE} --output text \
+    cloudformation describe-stacks \
+        --stack-name GitlabS3PoC-InternalProxy \
+        --query 'Stacks[].Outputs[?OutputKey==`InstancePrivateIp`].[OutputValue]')
+echo "InternalProxyIp = ${InternalProxyIp}"
+
+#dockerのProxy設定
+CONFIG='
+[Service]
+Environment="HTTP_PROXY=http://'"${HTUSER}:${HTPASSWORD}@${InternalProxyIp}"':3128"
+Environment="HTTPS_PROXY=http://'"${HTUSER}:${HTPASSWORD}@${InternalProxyIp}"':3128"
+Environment="NO_PROXY=localhost,127.0.0.1,169.254.169.254,169.254.169.123"
+'
+sudo mkdir -p /etc/systemd/system/docker.service.d
+echo "${CONFIG}" | sudo tee /etc/systemd/system/docker.service.d/http-proxy.conf
+
+# 認証情報が含まれているためrootユーザ以外はファイルが読めないように変更
+sudo chmod 640 /etc/systemd/system/docker.service.d/http-proxy.conf
+
+#設定の確認
+cat /etc/systemd/system/docker.service.d/http-proxy.conf
+
+#デーモン再起動
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+### (14)-(b) dockerのテスト
+aplineイメージを多段Proxy経由で外部からpullできるか確認します。
+```shell
+#alpineイメージを削除
+docker rmi alpine
+docker images
+
+#alpineイメージを削除
+docker pull alpine
+docker image ls
+```
 
 # 参考
 - https://docs.gitlab.com/ee/install/aws/
+
+- https://support.kaspersky.com/KWTS/6.1/ja-JP/166244.htm
+- https://webnetforce.net/squid-ssl-bump/
+
+- https://wiki.squid-cache.org/Features/DynamicSslCert
+- https://wiki.squid-cache.org/Features/SslPeekAndSplice
