@@ -100,7 +100,7 @@ Resources:
                 # Set Multi-Stage proxys
               - "cache_peer "
               - Fn::ImportValue: GitlabS3PoC-ExternalProxy-InstancePrivateIp
-              - " parent 3128 0 proxy-only\n"
+              - " parent 3128 0 proxy-only no-query login=PASS\n"
               - "\n"
               - "acl internal dstdomain \"/etc/squid/direct_access_list\"\n"
               - "cache_peer_access "
