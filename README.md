@@ -3,7 +3,7 @@
 <img src="./Documents/01_OverallStructure.png" whdth=500>
 
 作成後の実際の設定ファイル例についてこちらを参照
-- [作成した検証環境の各種設定ファイル例](.snippet.md)
+- [作成した検証環境の各種設定ファイル例](./snippet.md)
 
 # Step.1 SSL_Bumpなしの多段Proxy構成作成手順
 ## (1)事前設定
